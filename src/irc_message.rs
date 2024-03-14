@@ -1,5 +1,6 @@
-use core::fmt::Display;
+use core::{cmp, fmt::Display};
 
+use log::error;
 use thiserror::Error;
 
 #[derive(Debug)]
@@ -94,6 +95,16 @@ pub enum Message {
     // NOTE: server -> client PONG has a server param that must be ignored by the client.
     // clients must not send a server param to the server.
     Pong(String),
+    Oper,
+    Quit(Option<String>),
+    Error(String),
+
+    Join(Vec<(String, Option<String>)>),
+    Part(Vec<String>, Option<String>),
+    Topic(String, Option<String>),
+    Names(Vec<String>),
+
+    Privmsg(Vec<String>, String),
 
     Unknown(String, Vec<String>),
 }
@@ -113,13 +124,13 @@ impl Message {
         match command {
             "AUTHENTICATE" => Ok(Message::Authenticate),
             "PASS" => {
-                todo!()
+                todo!("PASS")
             }
             "NICK" => {
-                todo!()
+                todo!("NICK")
             }
             "USER" => {
-                todo!()
+                todo!("USER")
             }
             "PING" => {
                 let token = args
@@ -142,13 +153,68 @@ impl Message {
 impl Display for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Message::Cap => todo!(),
-            Message::Authenticate => todo!(),
-            Message::Pass(_) => todo!(),
-            Message::Nick(_) => todo!(),
-            Message::User(_, _) => todo!(),
-            Message::Ping(_) => todo!(),
-            Message::Pong(_) => todo!(),
+            Message::Cap => todo!("CAP"),
+            Message::Authenticate => write!(f, "AUTHENTICATE"),
+            Message::Pass(pass) => write!(f, "PASS :{}", pass),
+            Message::Nick(nick) => write!(f, "NICK :{}", nick),
+            Message::User(username, realname) => write!(f, "USER {} 0 * :{}", username, realname),
+            Message::Ping(token) => write!(f, "PING :{}", token),
+            Message::Pong(token) => write!(f, "PONG :{}", token),
+
+            Message::Oper => todo!(),
+            Message::Quit(reason) => {
+                let reason = match reason {
+                    Some(r) => format!(":{}", r),
+                    None => String::new(),
+                };
+                write!(f, "QUIT{}", reason)
+            }
+            Message::Error(_) => todo!("ERROR"),
+            Message::Join(channels) => {
+                if channels.len() == 0 {
+                    error!("JOIN message had no channels");
+                    return Err(core::fmt::Error);
+                }
+
+                // sort channels such that all channels that have a key are first.
+                // since keys are associated with channels based on their index, a gap in keys would
+                // cause keys to be incorrectly associated.
+                // FIXME: check if servers tend to accept an empty key?
+                let mut channels = channels.clone();
+                channels.sort_by(|(_, key1), (_, key2)| match (key1, key2) {
+                    (None, None) => cmp::Ordering::Equal,
+                    (None, Some(_)) => cmp::Ordering::Greater,
+                    (Some(_), None) => cmp::Ordering::Less,
+                    (Some(_), Some(_)) => cmp::Ordering::Equal,
+                });
+
+                let mut channels_str = String::new();
+                let keys_str = String::new();
+
+                for idx in 0..channels.len() - 1 {
+                    let (channel, key) = &channels[idx];
+                    channels_str.push_str(channel.as_str());
+                    channels_str.push(',');
+                    if let Some(_key) = key {
+                        todo!("key formatting not yet supported");
+                    }
+                }
+                // append final list element without a comma
+                let (channel, key) = &channels[channels.len() - 1];
+                channels_str.push_str(channel.as_str());
+                if let Some(_key) = key {
+                    todo!("key formatting not yet supported");
+                }
+
+                write!(f, "JOIN {} {}", channels_str, keys_str)
+            }
+            Message::Part(_, _) => todo!(),
+            Message::Topic(_, _) => todo!(),
+            Message::Names(_) => todo!(),
+            Message::Privmsg(targets, msg) => {
+                write!(f, "PRIVMSG {} :{}", targets.join(","), msg)
+            }
+
             Message::Unknown(name, params) => {
                 write!(f, "{}", name)?;
                 for param in params.iter() {
