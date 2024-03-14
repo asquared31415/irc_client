@@ -9,7 +9,10 @@ use color_eyre::eyre::Result;
 use eyre::bail;
 use log::*;
 
-use crate::{irc_message::IRCMessage, reader::IrcMessageReader};
+use crate::{
+    irc_message::{IRCMessage, Message},
+    reader::IrcMessageReader,
+};
 
 mod irc_message;
 mod reader;
@@ -20,10 +23,12 @@ fn main() -> Result<()> {
     env_logger::init();
     color_eyre::install()?;
 
-    // const TEST_MSG: &str = "PING nya";
+    const TEST_MSG: &str = "PASS uwu";
     // let x = IRCMessage::parse(TEST_MSG)?;
     // debug!("{:#?}", x);
     // assert_eq!(x.to_irc_string(), format!("{}\r\n", TEST_MSG));
+
+    // return Ok(());
 
     let mut stream = TcpStream::connect(ADDR)?;
 
@@ -33,6 +38,12 @@ fn main() -> Result<()> {
 
     let mut reader = IrcMessageReader::new(stream, |msg| {
         debug!("{:#?}", msg);
+        match msg.message {
+            Message::Ping(token) => {
+                warn!("PONG NYI!");
+            }
+            _ => {}
+        }
     });
 
     debug!("polling reader");
