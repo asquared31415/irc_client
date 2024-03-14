@@ -82,8 +82,12 @@ impl IRCMessage {
 pub enum MessageParseErr {
     #[error("message {} missing params", .0)]
     MissingParams(String),
+    #[error("message {} had invalid params", .0)]
+    InvalidParams(String),
 }
 
+// FIXME: remove this once all variants can be constructed
+#[allow(unused)]
 #[derive(Debug)]
 pub enum Message {
     Cap, // FIXME: missing args
@@ -99,13 +103,97 @@ pub enum Message {
     Quit(Option<String>),
     Error(String),
 
+    // channel management
     Join(Vec<(String, Option<String>)>),
     Part(Vec<String>, Option<String>),
     Topic(String, Option<String>),
     Names(Vec<String>),
+    List,
+    Invite {
+        nick: String,
+        channel: String,
+    },
+    Kick {
+        channel: String,
+        user: String,
+        comment: Option<String>,
+    },
 
-    Privmsg(Vec<String>, String),
+    // server queries and commands
+    Motd {
+        server: Option<String>,
+    },
+    Version {
+        server: Option<String>,
+    },
+    Admin {
+        server: Option<String>,
+    },
+    Connect {
+        server: String,
+        port: Option<u16>,
+        // FIXME: remote server support
+    },
+    Lusers,
+    Time {
+        server: Option<String>,
+    },
+    Stats {
+        query: char,
+        server: Option<String>,
+    },
+    Help {
+        subject: Option<String>,
+    },
+    Info,
+    Mode {
+        target: String,
+        mode: Option<String>,
+    },
 
+    // messages
+    Privmsg {
+        targets: Vec<String>,
+        msg: String,
+    },
+    Notice {
+        targets: Vec<String>,
+        msg: String,
+    },
+
+    // user queries
+    Who {
+        mask: String,
+    },
+    Whois {
+        target: Option<String>,
+        nick: String,
+    },
+    WhoWas {
+        nick: String,
+        count: Option<u16>,
+    },
+
+    // operator
+    Kill {
+        nick: String,
+        comment: String,
+    },
+    Rehash,
+    Restart,
+    SQuit {
+        server: String,
+        comment: String,
+    },
+
+    // optional but suggested messages
+    Away {
+        message: Option<String>,
+    },
+    Links,
+    // FIXME: USERHOST, WALLOPS
+
+    // an unknown message
     Unknown(String, Vec<String>),
 }
 
@@ -122,35 +210,183 @@ impl Message {
         let args = parse_params(args);
 
         match command {
+            "CAP" => {
+                todo!()
+            }
             "AUTHENTICATE" => Ok(Message::Authenticate),
             "PASS" => {
-                todo!("PASS")
+                todo!()
             }
             "NICK" => {
-                todo!("NICK")
+                todo!()
             }
             "USER" => {
-                todo!("USER")
+                todo!()
             }
             "PING" => {
                 let token = args
                     .first()
-                    .ok_or_else(|| MessageParseErr::MissingParams(command.to_string()))?;
+                    .ok_or_else(|| MessageParseErr::MissingParams(s.to_string()))?;
                 Ok(Message::Ping(token.to_string()))
             }
             "PONG" => {
                 // clients must ignore the server param
                 let [_server, token, ..] = args.as_slice() else {
-                    return Err(MessageParseErr::MissingParams(command.to_string()));
+                    return Err(MessageParseErr::MissingParams(s.to_string()));
                 };
                 Ok(Message::Pong(token.to_string()))
             }
+            "OPER" => {
+                todo!()
+            }
+            "QUIT" => {
+                todo!()
+            }
+            "ERROR" => {
+                todo!()
+            }
+            "JOIN" => {
+                let (channels, keys) = match args.as_slice() {
+                    [] => {
+                        return Err(MessageParseErr::MissingParams(s.to_string()));
+                    }
+                    [channels] => (
+                        channels
+                            .split(',')
+                            .map(|s| s.to_string())
+                            .collect::<Vec<_>>(),
+                        vec![],
+                    ),
+                    [channels, keys, ..] => (
+                        channels
+                            .split(',')
+                            .map(|s| s.to_string())
+                            .collect::<Vec<_>>(),
+                        keys.split(',').map(|s| s.to_string()).collect::<Vec<_>>(),
+                    ),
+                };
+
+                if keys.len() > channels.len() {
+                    return Err(MessageParseErr::InvalidParams(s.to_string()));
+                }
+
+                let pairs = channels
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, val)| (val, keys.get(idx).cloned()))
+                    .collect::<Vec<_>>();
+                Ok(Message::Join(pairs))
+            }
+            "PART" => {
+                todo!()
+            }
+            "TOPIC" => {
+                todo!()
+            }
+            "NAMES" => {
+                todo!()
+            }
+            "LIST" => {
+                todo!()
+            }
+            "INVITE" => {
+                todo!()
+            }
+            "KICK" => {
+                todo!()
+            }
+            "MOTD" => {
+                todo!()
+            }
+            "VERSION" => {
+                todo!()
+            }
+            "ADMIN" => {
+                todo!()
+            }
+            "CONNECT" => {
+                todo!()
+            }
+            "LUSERS" => {
+                todo!()
+            }
+            "TIME" => {
+                todo!()
+            }
+            "STATS" => {
+                todo!()
+            }
+            "HELP" => {
+                todo!()
+            }
+            "INFO" => {
+                todo!()
+            }
+            "MODE" => {
+                todo!()
+            }
+            "PRIVMSG" => {
+                let [targets, msg, ..] = args.as_slice() else {
+                    return Err(MessageParseErr::MissingParams(s.to_string()));
+                };
+                Ok(Message::Privmsg {
+                    targets: targets
+                        .split(',')
+                        .map(|s| s.to_string())
+                        .collect::<Vec<_>>(),
+                    msg: msg.to_string(),
+                })
+            }
+            "NOTICE" => {
+                let [targets, msg, ..] = args.as_slice() else {
+                    return Err(MessageParseErr::MissingParams(s.to_string()));
+                };
+                Ok(Message::Notice {
+                    targets: targets
+                        .split(',')
+                        .map(|s| s.to_string())
+                        .collect::<Vec<_>>(),
+                    msg: msg.to_string(),
+                })
+            }
+            "WHO" => {
+                todo!()
+            }
+            "WHOIS" => {
+                todo!()
+            }
+            "WHOWAS" => {
+                todo!()
+            }
+            "KILL" => {
+                todo!()
+            }
+            "REHASH" => {
+                todo!()
+            }
+            "RESTART" => {
+                todo!()
+            }
+            "SQUIT" => {
+                todo!()
+            }
+            "AWAY" => {
+                todo!()
+            }
+            "LINKS" => {
+                todo!()
+            }
+            // TODO: numerics
+
+            // unknown command
             _ => Ok(Message::Unknown(command.to_string(), args)),
         }
     }
 }
 
 impl Display for Message {
+    // FIXME: remove this!
+    #[allow(unused)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Message::Cap => todo!("CAP"),
@@ -161,7 +397,7 @@ impl Display for Message {
             Message::Ping(token) => write!(f, "PING :{}", token),
             Message::Pong(token) => write!(f, "PONG :{}", token),
 
-            Message::Oper => todo!(),
+            Message::Oper => todo!("OPER"),
             Message::Quit(reason) => {
                 let reason = match reason {
                     Some(r) => format!(":{}", r),
@@ -211,9 +447,36 @@ impl Display for Message {
             Message::Part(_, _) => todo!(),
             Message::Topic(_, _) => todo!(),
             Message::Names(_) => todo!(),
-            Message::Privmsg(targets, msg) => {
+            Message::List => todo!(),
+            Message::Invite { nick, channel } => todo!(),
+            Message::Kick {
+                channel,
+                user,
+                comment,
+            } => todo!(),
+            Message::Motd { server } => todo!(),
+            Message::Version { server } => todo!(),
+            Message::Admin { server } => todo!(),
+            Message::Connect { server, port } => todo!(),
+            Message::Lusers => todo!(),
+            Message::Time { server } => todo!(),
+            Message::Stats { query, server } => todo!(),
+            Message::Help { subject } => todo!(),
+            Message::Info => todo!(),
+            Message::Mode { target, mode } => todo!(),
+            Message::Privmsg { targets, msg } => {
                 write!(f, "PRIVMSG {} :{}", targets.join(","), msg)
             }
+            Message::Notice { targets, msg: text } => todo!(),
+            Message::Who { mask } => todo!(),
+            Message::Whois { target, nick } => todo!(),
+            Message::WhoWas { nick, count } => todo!(),
+            Message::Kill { nick, comment } => todo!(),
+            Message::Rehash => todo!(),
+            Message::Restart => todo!(),
+            Message::SQuit { server, comment } => todo!(),
+            Message::Away { message } => todo!(),
+            Message::Links => todo!(),
 
             Message::Unknown(name, params) => {
                 write!(f, "{}", name)?;
@@ -226,6 +489,7 @@ impl Display for Message {
     }
 }
 
+// TODO: parse lists nicely too
 fn parse_params(s: &str) -> Vec<String> {
     let mut params = vec![];
 

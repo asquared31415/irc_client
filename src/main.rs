@@ -92,10 +92,10 @@ fn main() -> Result<()> {
     sender.send(IRCMessage {
         tags: None,
         source: None,
-        message: Message::Privmsg(
-            vec![String::from("#testing")],
-            String::from("this is a test msg"),
-        ),
+        message: Message::Privmsg {
+            targets: vec![String::from("#testing")],
+            msg: String::from("this is a test msg"),
+        },
     })?;
 
     let mut ping_idx = 0;
