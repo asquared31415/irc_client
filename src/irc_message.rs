@@ -72,6 +72,7 @@ impl IRCMessage {
         }
 
         message.push_str(self.message.to_string().as_str());
+        message.push_str("\r\n");
         message
     }
 }
