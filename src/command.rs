@@ -60,8 +60,8 @@ impl Command {
     pub fn handle(&self, state: &mut ClientState, sender: &Sender<IRCMessage>) -> eyre::Result<()> {
         match self {
             Command::Join(channel) => {
-                let ClientState::Connected(ConnectedState { channels, .. }) = state else {
-                    bail!("can only join when connected")
+                let ClientState::Connected(ConnectedState { .. }) = state else {
+                    bail!("can only join when connected");
                 };
 
                 sender.send(IRCMessage {
@@ -69,8 +69,6 @@ impl Command {
                     source: None,
                     message: Message::Join(vec![(channel.to_string(), None)]),
                 })?;
-                // TODO: update this on the recv side
-                channels.push(channel.to_string());
             }
         }
 

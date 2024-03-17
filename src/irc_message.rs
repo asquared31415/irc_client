@@ -1,4 +1,4 @@
-use core::{cmp, fmt::Display};
+use core::cmp;
 
 use log::error;
 use thiserror::Error;
@@ -18,6 +18,12 @@ pub enum IrcParseErr {
     MissingCommand,
     #[error(transparent)]
     MessageParseErr(#[from] MessageParseErr),
+}
+
+#[derive(Debug, Error)]
+pub enum MessageToStringErr {
+    #[error("clients may not create a {} message", .0)]
+    ClientMayNotCreate(String),
 }
 
 impl IRCMessage {
@@ -61,7 +67,7 @@ impl IRCMessage {
 
     // turns this message into a string that can be sent across the IRC connection directly. the
     // returned value includes the trailing CRLF that all messages must have.
-    pub fn to_irc_string(&self) -> String {
+    pub fn to_irc_string(&self) -> Result<String, MessageToStringErr> {
         let mut message = String::new();
 
         if let Some(_tags) = self.tags {
@@ -72,9 +78,9 @@ impl IRCMessage {
             todo!()
         }
 
-        message.push_str(self.message.to_string().as_str());
+        message.push_str(self.message.to_string()?.as_str());
         message.push_str("\r\n");
-        message
+        Ok(message)
     }
 }
 
@@ -191,7 +197,11 @@ pub enum Message {
         message: Option<String>,
     },
     Links,
-    // FIXME: USERHOST, WALLOPS
+    // FIXME: ADD USERHOST, WALLOPS
+    Numeric {
+        num: u16,
+        args: Vec<String>,
+    },
 
     // an unknown message
     Unknown(String, Vec<String>),
@@ -377,25 +387,26 @@ impl Message {
                 todo!()
             }
             // TODO: numerics
-
-            // unknown command
-            _ => Ok(Message::Unknown(command.to_string(), args)),
+            other => match other.parse::<u16>() {
+                // numerics may only be 3 digits
+                Ok(num) if num <= 999 => Ok(Message::Numeric { num, args }),
+                _ => Ok(Message::Unknown(other.to_string(), args)),
+            },
         }
     }
-}
 
-impl Display for Message {
-    // FIXME: remove this!
-    #[allow(unused)]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
+    fn to_string(&self) -> Result<String, MessageToStringErr> {
+        // FIXME: remove this!
+        #[allow(unused)]
+        //errors are returned early
+        let msg = match self {
             Message::Cap => todo!("CAP"),
-            Message::Authenticate => write!(f, "AUTHENTICATE"),
-            Message::Pass(pass) => write!(f, "PASS :{}", pass),
-            Message::Nick(nick) => write!(f, "NICK :{}", nick),
-            Message::User(username, realname) => write!(f, "USER {} 0 * :{}", username, realname),
-            Message::Ping(token) => write!(f, "PING :{}", token),
-            Message::Pong(token) => write!(f, "PONG :{}", token),
+            Message::Authenticate => String::from("AUTHENTICATE"),
+            Message::Pass(pass) => format!("PASS :{}", pass),
+            Message::Nick(nick) => format!("NICK :{}", nick),
+            Message::User(username, realname) => format!("USER {} 0 * :{}", username, realname),
+            Message::Ping(token) => format!("PING :{}", token),
+            Message::Pong(token) => format!("PONG :{}", token),
 
             Message::Oper => todo!("OPER"),
             Message::Quit(reason) => {
@@ -403,13 +414,17 @@ impl Display for Message {
                     Some(r) => format!(":{}", r),
                     None => String::new(),
                 };
-                write!(f, "QUIT{}", reason)
+                format!("QUIT{}", reason)
             }
-            Message::Error(_) => todo!("ERROR"),
+            Message::Error(_) => {
+                return Err(MessageToStringErr::ClientMayNotCreate(String::from(
+                    "ERROR",
+                )));
+            }
             Message::Join(channels) => {
                 if channels.len() == 0 {
                     error!("JOIN message had no channels");
-                    return Err(core::fmt::Error);
+                    todo!()
                 }
 
                 // sort channels such that all channels that have a key are first.
@@ -442,7 +457,7 @@ impl Display for Message {
                     todo!("key formatting not yet supported");
                 }
 
-                write!(f, "JOIN {} {}", channels_str, keys_str)
+                format!("JOIN {} {}", channels_str, keys_str)
             }
             Message::Part(_, _) => todo!(),
             Message::Topic(_, _) => todo!(),
@@ -465,7 +480,7 @@ impl Display for Message {
             Message::Info => todo!(),
             Message::Mode { target, mode } => todo!(),
             Message::Privmsg { targets, msg } => {
-                write!(f, "PRIVMSG {} :{}", targets.join(","), msg)
+                format!("PRIVMSG {} :{}", targets.join(","), msg)
             }
             Message::Notice { targets, msg: text } => todo!(),
             Message::Who { mask } => todo!(),
@@ -478,14 +493,21 @@ impl Display for Message {
             Message::Away { message } => todo!(),
             Message::Links => todo!(),
 
-            Message::Unknown(name, params) => {
-                write!(f, "{}", name)?;
-                for param in params.iter() {
-                    write!(f, " {}", param)?;
-                }
-                Ok(())
+            Message::Numeric { num, .. } => {
+                return Err(MessageToStringErr::ClientMayNotCreate(num.to_string()));
             }
-        }
+
+            Message::Unknown(name, params) => {
+                let mut msg = name.to_string();
+                for param in params.iter() {
+                    msg.push(' ');
+                    msg.push_str(param.as_str());
+                }
+                msg
+            }
+        };
+
+        Ok(msg)
     }
 }
 

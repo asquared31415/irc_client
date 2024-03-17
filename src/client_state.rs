@@ -6,7 +6,8 @@ use std::{
 };
 
 use color_eyre::eyre::Result;
-use eyre::eyre;
+use eyre::{bail, eyre};
+use indexmap::IndexSet;
 use log::*;
 use owo_colors::OwoColorize;
 
@@ -51,7 +52,7 @@ impl Client {
                     let msg = queue_receiver.recv()?;
                     let s = msg.to_irc_string();
                     trace!("sending message: {:#?}: {:?}", msg, s);
-                    writer.write_all(s.as_bytes())?;
+                    writer.write_all(s?.as_bytes())?;
                     writer.flush()?;
                 }
             }
@@ -65,7 +66,7 @@ impl Client {
                 loop {
                     trace!("reading");
                     let msg = msg_reader.recv()?;
-                    trace!("got msg {:#?}", msg);
+                    debug!("got msg {:#?}", msg);
                     msg_sender.send(msg)?;
                 }
             }
@@ -80,7 +81,13 @@ impl Client {
                 loop {
                     let input = ui.read()?;
                     // TODO: handle this and report it
-                    Client::handle_input(&mut *state.lock().unwrap(), &queue_sender, input.trim());
+                    if let Err(e) = Client::handle_input(
+                        &mut *state.lock().unwrap(),
+                        &queue_sender,
+                        input.trim(),
+                    ) {
+                        error!("{}", e);
+                    }
                 }
             }
         });
@@ -100,34 +107,77 @@ impl Client {
 
     fn on_msg(&mut self, msg: IRCMessage, sender: &Sender<IRCMessage>) -> Result<()> {
         let state = &mut *self.state.try_lock().map_err(|_| eyre!(""))?;
-        match state {
-            ClientState::Registration(RegistrationState { requested_nick }) => {
-                match msg.message {
-                    Message::Ping(token) => {
-                        // TODO: when you do this state better, read the real nick from 001 and
-                        // compare/notify user
-                        *state = ClientState::Connected(ConnectedState {
-                            nick: requested_nick.to_string(),
-                            channels: vec![],
-                        });
+        debug!("state on msg: {:#?}", state);
+        match msg.message {
+            // =====================
+            // PING
+            // =====================
+            Message::Ping(token) => sender.send(IRCMessage {
+                tags: None,
+                source: None,
+                message: Message::Pong(token.to_string()),
+            })?,
 
-                        sender.send(IRCMessage {
-                            tags: None,
-                            source: None,
-                            message: Message::Pong(token),
-                        })?;
-                    }
-                    Message::Notice { targets: _, msg } => {
-                        self.ui.writeln(format!("{} {}", "NOTICE".yellow(), msg))?;
-                    }
-                    _ => {
-                        warn!("unexpected message in registration state {:#?}", msg);
-                    }
+            // =====================
+            // REGISTRATION
+            // =====================
+            Message::Numeric { num: 1, args } => {
+                let ClientState::Registration(RegistrationState { requested_nick }) = state else {
+                    warn!("got a 001 when already registered");
+                    return Ok(());
+                };
+
+                let [nick, ..] = args.as_slice() else {
+                    bail!("RPL_001 had no nick arg");
+                };
+
+                if requested_nick != nick {
+                    self.ui.writeln(format!(
+                        "{}: requested nick {}, but got nick {}",
+                        "WARNING".bright_yellow(),
+                        requested_nick,
+                        nick
+                    ))?;
                 }
-            }
-            ClientState::Connected(_) => {}
-        }
 
+                *state = ClientState::Connected(ConnectedState {
+                    nick: nick.to_string(),
+                    channels: IndexSet::new(),
+                });
+            }
+
+            // =====================
+            // CHANNEL STATE
+            // =====================
+            Message::Join(join_channels) => {
+                let ClientState::Connected(ConnectedState { channels, .. }) = state else {
+                    bail!("JOIN messages can only be processed when connected to a server");
+                };
+                // TODO: check source
+
+                channels.extend(join_channels.into_iter().map(|(channel, _)| channel));
+            }
+
+            // =====================
+            // MESSAGES
+            // =====================
+            Message::Privmsg { msg, .. } => {
+                // TODO: prefix with SOURCE and check whether target is channel vs user
+                self.ui.writeln(msg)?;
+            }
+            Message::Notice { msg, .. } => {
+                self.ui
+                    .writeln(format!("{} {}", "NOTICE".bright_yellow(), msg))?
+            }
+
+            // =====================
+            // UNKNOWN
+            // =====================
+            unk => {
+                warn!("unhandled msg {:?}", unk);
+            }
+        }
+        debug!("state after msg: {:#?}", state);
         Ok(())
     }
 
@@ -160,7 +210,7 @@ impl Client {
                             tags: None,
                             source: None,
                             message: Message::Privmsg {
-                                targets: channels.to_vec(),
+                                targets: channels.as_slice().iter().cloned().collect(),
                                 msg: input.to_string(),
                             },
                         })?;
@@ -190,5 +240,5 @@ pub struct RegistrationState {
 pub struct ConnectedState {
     pub nick: String,
     // list of connected channel names. each name includes the prefix.
-    pub channels: Vec<String>,
+    pub channels: IndexSet<String>,
 }
