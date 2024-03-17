@@ -150,25 +150,66 @@ impl Client {
             // CHANNEL STATE
             // =====================
             Message::Join(join_channels) => {
-                let ClientState::Connected(ConnectedState { channels, .. }) = state else {
+                let ClientState::Connected(ConnectedState { nick, channels }) = state else {
                     bail!("JOIN messages can only be processed when connected to a server");
                 };
-                // TODO: check source
+                let join_channels = join_channels
+                    .into_iter()
+                    .map(|(channel, _)| channel)
+                    .collect::<Vec<_>>();
 
-                channels.extend(join_channels.into_iter().map(|(channel, _)| channel));
+                // if the source of the join is ourself, update the list of joined channels,
+                // otherwise announce a join
+                match msg.source.as_ref().map(|source| source.get_name()) {
+                    Some(source) if source == nick => {
+                        for chan in join_channels.iter() {
+                            self.ui
+                                .writeln(format!("{} {}", "JOINED".bright_blue(), chan))?;
+                        }
+                        channels.extend(join_channels);
+                    }
+                    Some(other) => {
+                        for chan in join_channels.iter() {
+                            self.ui.writeln(format!(
+                                "{} joined {}",
+                                other.bright_purple(),
+                                chan
+                            ))?;
+                        }
+                    }
+                    None => {
+                        warn!("JOIN msg without a source");
+                    }
+                }
             }
 
             // =====================
             // MESSAGES
             // =====================
-            Message::Privmsg { msg, .. } => {
-                // TODO: prefix with SOURCE and check whether target is channel vs user
-                self.ui.writeln(msg)?;
+            Message::Privmsg {
+                msg: notice_msg, ..
+            } => {
+                // TODO: check whether target is channel vs user
+                self.ui.writeln(format!(
+                    "{}{}",
+                    msg.source
+                        .as_ref()
+                        .map(|source| format!("<{}> ", source.green()))
+                        .unwrap_or_default(),
+                    notice_msg
+                ))?
             }
-            Message::Notice { msg, .. } => {
-                self.ui
-                    .writeln(format!("{} {}", "NOTICE".bright_yellow(), msg))?
-            }
+            Message::Notice {
+                msg: notice_msg, ..
+            } => self.ui.writeln(format!(
+                "{}{} {}",
+                msg.source
+                    .as_ref()
+                    .map(|source| format!("{} ", source.green()))
+                    .unwrap_or_default(),
+                "NOTICE".bright_yellow(),
+                notice_msg
+            ))?,
 
             // =====================
             // UNKNOWN
@@ -192,7 +233,7 @@ impl Client {
                 Ok(())
             }
             ClientState::Connected(ConnectedState { channels, .. }) => {
-                if let Some((_, input)) = input.split_first_matches('/') {
+                if let Some((_, input)) = input.split_prefix('/') {
                     let cmd = Command::parse(input)?;
                     debug!("cmd {:?}", cmd);
                     cmd.handle(state, sender)?;

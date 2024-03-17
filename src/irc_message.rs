@@ -1,12 +1,44 @@
-use core::cmp;
+use core::{
+    cmp,
+    fmt::{Debug, Display},
+};
 
-use log::error;
+use log::{debug, error};
 use thiserror::Error;
+
+use crate::ext::StrExt as _;
+
+pub struct Source(String);
+
+impl Source {
+    pub fn get_name(&self) -> &str {
+        self.0
+            .split_once('!')
+            .map(|(name, _)| name)
+            .unwrap_or(self.0.as_str())
+    }
+}
+
+impl Debug for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if f.alternate() {
+            write!(f, "Source({:?})", self.get_name())
+        } else {
+            write!(f, "Source({:?})", self.0)
+        }
+    }
+}
+
+impl Display for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.get_name())
+    }
+}
 
 #[derive(Debug)]
 pub struct IRCMessage {
     pub tags: Option<()>,
-    pub source: Option<()>,
+    pub source: Option<Source>,
     pub message: Message,
 }
 
@@ -30,6 +62,7 @@ impl IRCMessage {
     /// parses a message from a string. the string must contain only a single message. the string
     /// must not contain CRLF.
     pub fn parse(s: &str) -> Result<Self, IrcParseErr> {
+        debug!("parsing {:?}", s);
         if s.contains("\r\n") {
             return Err(IrcParseErr::InteriorCRLF);
         }
@@ -46,12 +79,17 @@ impl IRCMessage {
         }
 
         // optional source section
-        if s.starts_with(':') {
-            // TODO: source
-            // if there is no space found, then the command part of the message is missing
-            let space = s.find(' ').ok_or(IrcParseErr::MissingCommand)?;
-            s = &s[space..];
-        }
+        let source = if let Some((_, rest)) = s.split_prefix(':') {
+            let Some((source, rest)) = rest.split_once(' ') else {
+                // if there's not a space after the source, the command is missing
+                return Err(IrcParseErr::MissingCommand);
+            };
+
+            s = rest;
+            Some(Source(source.to_string()))
+        } else {
+            None
+        };
 
         s = s.trim_start_matches(' ');
         if s.len() == 0 {
@@ -60,7 +98,7 @@ impl IRCMessage {
 
         Ok(IRCMessage {
             tags: None,
-            source: None,
+            source,
             message: Message::parse(s)?,
         })
     }
@@ -74,7 +112,7 @@ impl IRCMessage {
             todo!()
         }
 
-        if let Some(_source) = self.source {
+        if let Some(_source) = &self.source {
             todo!()
         }
 
