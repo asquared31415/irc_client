@@ -74,11 +74,13 @@ impl Client {
         // user interaction using stdin
         let _ = thread::spawn({
             let state = Arc::clone(&self.state);
+            let queue_sender = queue_sender.clone();
             let ui = Arc::clone(&self.ui);
             move || -> Result<!> {
                 loop {
                     let input = ui.read()?;
-                    Client::handle_input(&mut *state.lock().unwrap(), input.trim());
+                    // TODO: handle this and report it
+                    Client::handle_input(&mut *state.lock().unwrap(), &queue_sender, input.trim());
                 }
             }
         });
@@ -89,6 +91,7 @@ impl Client {
         // main code that processes state as messages come in
         loop {
             let msg = msg_receiver.recv()?;
+            trace!("handling msg");
             self.on_msg(msg, &queue_sender)?;
         }
         // only terminates on error
@@ -105,6 +108,7 @@ impl Client {
                         // compare/notify user
                         *state = ClientState::Connected(ConnectedState {
                             nick: requested_nick.to_string(),
+                            channels: vec![],
                         });
 
                         sender.send(IRCMessage {
@@ -127,13 +131,44 @@ impl Client {
         Ok(())
     }
 
-    fn handle_input(state: &mut ClientState, input: &str) {
-        debug!("{:#?}", state);
-        if let Some((_, input)) = input.split_first_matches('/') {
-            let cmd = Command::parse(input);
-            debug!("cmd {:?}", cmd);
-        } else {
-            debug!("not a /: {:?}", input);
+    fn handle_input(
+        state: &mut ClientState,
+        sender: &Sender<IRCMessage>,
+        input: &str,
+    ) -> Result<()> {
+        match state {
+            ClientState::Registration(_) => {
+                warn!("input during registration NYI");
+                Ok(())
+            }
+            ClientState::Connected(ConnectedState { channels, .. }) => {
+                if let Some((_, input)) = input.split_first_matches('/') {
+                    let cmd = Command::parse(input)?;
+                    debug!("cmd {:?}", cmd);
+                    cmd.handle(state, sender)?;
+
+                    Ok(())
+                } else {
+                    debug!("not a /: {:?}", input);
+                    debug!("channels: {:?}", channels);
+                    if channels.len() == 0 {
+                        warn!("cannot send a message to 0 channels");
+                    } else if channels.len() > 1 {
+                        warn!("multiple channels NYI");
+                    } else {
+                        sender.send(IRCMessage {
+                            tags: None,
+                            source: None,
+                            message: Message::Privmsg {
+                                targets: channels.to_vec(),
+                                msg: input.to_string(),
+                            },
+                        })?;
+                    }
+
+                    Ok(())
+                }
+            }
         }
     }
 }
@@ -153,5 +188,7 @@ pub struct RegistrationState {
 
 #[derive(Debug)]
 pub struct ConnectedState {
-    nick: String,
+    pub nick: String,
+    // list of connected channel names. each name includes the prefix.
+    pub channels: Vec<String>,
 }
