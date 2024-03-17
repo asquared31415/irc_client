@@ -47,27 +47,51 @@ impl Client {
 
         let _ = thread::spawn({
             let mut writer = self.stream.try_clone()?;
-            move || -> Result<!> {
-                loop {
+            move || {
+                let mut inner = || -> eyre::Result<()> {
                     let msg = queue_receiver.recv()?;
                     let s = msg.to_irc_string();
                     trace!("sending message: {:#?}: {:?}", msg, s);
                     writer.write_all(s?.as_bytes())?;
                     writer.flush()?;
+                    Ok(())
+                };
+
+                loop {
+                    // if an error is encountered, log them and exit the thread
+                    match inner() {
+                        Ok(()) => {}
+                        Err(e) => {
+                            error!("{}", e);
+                            return;
+                        }
+                    }
                 }
             }
         });
 
         let _ = thread::spawn({
             let reader = self.stream.try_clone()?;
-            move || -> Result<!> {
+            move || {
                 let mut msg_reader = IrcMessageReader::new(reader);
 
-                loop {
+                let mut inner = || -> eyre::Result<()> {
                     trace!("reading");
                     let msg = msg_reader.recv()?;
                     debug!("got msg {:#?}", msg);
                     msg_sender.send(msg)?;
+                    Ok(())
+                };
+
+                loop {
+                    // if an error is encountered, log them and exit the thread
+                    match inner() {
+                        Ok(()) => {}
+                        Err(e) => {
+                            error!("{}", e);
+                            return;
+                        }
+                    }
                 }
             }
         });
@@ -77,16 +101,21 @@ impl Client {
             let state = Arc::clone(&self.state);
             let queue_sender = queue_sender.clone();
             let ui = Arc::clone(&self.ui);
-            move || -> Result<!> {
-                loop {
+            move || {
+                let inner = || -> eyre::Result<()> {
                     let input = ui.read()?;
-                    // TODO: handle this and report it
-                    if let Err(e) = Client::handle_input(
-                        &mut *state.lock().unwrap(),
-                        &queue_sender,
-                        input.trim(),
-                    ) {
-                        error!("{}", e);
+                    Client::handle_input(&mut *state.lock().unwrap(), &queue_sender, input.trim())?;
+                    Ok(())
+                };
+
+                loop {
+                    // if an error is encountered, log them and exit the thread
+                    match inner() {
+                        Ok(()) => {}
+                        Err(e) => {
+                            error!("{}", e);
+                            return;
+                        }
                     }
                 }
             }
@@ -129,6 +158,9 @@ impl Client {
 
                 let [nick, ..] = args.as_slice() else {
                     bail!("RPL_001 had no nick arg");
+                };
+                let Some(nick) = nick.as_str() else {
+                    bail!("nick must be a string argument");
                 };
 
                 if requested_nick != nick {

@@ -8,6 +8,41 @@ use thiserror::Error;
 
 use crate::ext::StrExt as _;
 
+// expects a parameter to be a string parameter, and extracts it, otherwise returns an invalid param
+// err.
+macro_rules! expect_string_param {
+    ($expr:expr) => {{
+        let param = $expr;
+        match param.as_str() {
+            Some(s) => s.to_string(),
+            None => return Err(MessageParseErr::InvalidParams),
+        }
+    }};
+}
+
+// expects a parameter to be a list parameter, and extracts it, otherwise returns an invalid param
+// err.
+macro_rules! expect_list_param {
+    ($expr:expr) => {{
+        let param = $expr;
+        match param.as_list() {
+            Some(list) => list.to_vec(),
+            None => return Err(MessageParseErr::InvalidParams),
+        }
+    }};
+}
+
+macro_rules! expect_target_param {
+    ($expr:expr) => {{
+        let param = $expr;
+        match param {
+            Param::String(s) if s == "*" => vec![String::from("*")],
+            Param::String(_) => return Err(MessageParseErr::InvalidParams),
+            Param::List(list) => list.to_vec(),
+        }
+    }};
+}
+
 pub struct Source(String);
 
 impl Source {
@@ -56,6 +91,8 @@ pub enum IrcParseErr {
 pub enum MessageToStringErr {
     #[error("clients may not create a {} message", .0)]
     ClientMayNotCreate(String),
+    #[error("clients must not send a source with their messages")]
+    ClientMustNotSendSource,
 }
 
 impl IRCMessage {
@@ -112,8 +149,9 @@ impl IRCMessage {
             todo!()
         }
 
-        if let Some(_source) = &self.source {
-            todo!()
+        // clients must never send a source to the server
+        if self.source.is_some() {
+            return Err(MessageToStringErr::ClientMustNotSendSource);
         }
 
         message.push_str(self.message.to_string()?.as_str());
@@ -126,8 +164,8 @@ impl IRCMessage {
 pub enum MessageParseErr {
     #[error("message {} missing params", .0)]
     MissingParams(String),
-    #[error("message {} had invalid params", .0)]
-    InvalidParams(String),
+    #[error("message had invalid params")]
+    InvalidParams,
 }
 
 // FIXME: remove this once all variants can be constructed
@@ -238,11 +276,11 @@ pub enum Message {
     // FIXME: ADD USERHOST, WALLOPS
     Numeric {
         num: u16,
-        args: Vec<String>,
+        args: Vec<Param>,
     },
 
     // an unknown message
-    Unknown(String, Vec<String>),
+    Unknown(String, Vec<Param>),
 }
 
 impl Message {
@@ -266,29 +304,45 @@ impl Message {
                 todo!()
             }
             "NICK" => {
-                todo!()
+                let [nick, ..] = args.as_slice() else {
+                    return Err(MessageParseErr::MissingParams(s.to_string()));
+                };
+                let nick = expect_string_param!(nick);
+                Ok(Message::Nick(nick))
             }
             "USER" => {
-                todo!()
+                let [username, _, _, realname, ..] = args.as_slice() else {
+                    return Err(MessageParseErr::MissingParams(s.to_string()));
+                };
+                let username = expect_string_param!(username);
+                let realname = expect_string_param!(realname);
+                Ok(Message::User(username, realname))
             }
             "PING" => {
-                let token = args
-                    .first()
-                    .ok_or_else(|| MessageParseErr::MissingParams(s.to_string()))?;
-                Ok(Message::Ping(token.to_string()))
+                let token = expect_string_param!(
+                    args.first()
+                        .ok_or_else(|| MessageParseErr::MissingParams(s.to_string()))?
+                );
+                Ok(Message::Ping(token))
             }
             "PONG" => {
                 // clients must ignore the server param
                 let [_server, token, ..] = args.as_slice() else {
                     return Err(MessageParseErr::MissingParams(s.to_string()));
                 };
-                Ok(Message::Pong(token.to_string()))
+                let token = expect_string_param!(token);
+                Ok(Message::Pong(token))
             }
             "OPER" => {
                 todo!()
             }
             "QUIT" => {
-                todo!()
+                // reason is optional, can be a QUIT with no args
+                let reason = match args.first() {
+                    Some(p) => Some(expect_string_param!(p)),
+                    None => None,
+                };
+                Ok(Message::Quit(reason))
             }
             "ERROR" => {
                 todo!()
@@ -298,24 +352,14 @@ impl Message {
                     [] => {
                         return Err(MessageParseErr::MissingParams(s.to_string()));
                     }
-                    [channels] => (
-                        channels
-                            .split(',')
-                            .map(|s| s.to_string())
-                            .collect::<Vec<_>>(),
-                        vec![],
-                    ),
-                    [channels, keys, ..] => (
-                        channels
-                            .split(',')
-                            .map(|s| s.to_string())
-                            .collect::<Vec<_>>(),
-                        keys.split(',').map(|s| s.to_string()).collect::<Vec<_>>(),
-                    ),
+                    [channels] => (expect_list_param!(channels), vec![]),
+                    [channels, keys, ..] => {
+                        (expect_list_param!(channels), expect_list_param!(keys))
+                    }
                 };
 
                 if keys.len() > channels.len() {
-                    return Err(MessageParseErr::InvalidParams(s.to_string()));
+                    return Err(MessageParseErr::InvalidParams);
                 }
 
                 let pairs = channels
@@ -326,7 +370,15 @@ impl Message {
                 Ok(Message::Join(pairs))
             }
             "PART" => {
-                todo!()
+                let [channels, rest @ ..] = args.as_slice() else {
+                    return Err(MessageParseErr::MissingParams(s.to_string()));
+                };
+                let channels = expect_list_param!(channels);
+                let reason = match rest.first() {
+                    Some(param) => Some(expect_string_param!(param)),
+                    None => None,
+                };
+                Ok(Message::Part(channels, reason))
             }
             "TOPIC" => {
                 todo!()
@@ -377,25 +429,17 @@ impl Message {
                 let [targets, msg, ..] = args.as_slice() else {
                     return Err(MessageParseErr::MissingParams(s.to_string()));
                 };
-                Ok(Message::Privmsg {
-                    targets: targets
-                        .split(',')
-                        .map(|s| s.to_string())
-                        .collect::<Vec<_>>(),
-                    msg: msg.to_string(),
-                })
+                let targets = expect_target_param!(targets);
+                let msg = expect_string_param!(msg);
+                Ok(Message::Privmsg { targets, msg })
             }
             "NOTICE" => {
                 let [targets, msg, ..] = args.as_slice() else {
                     return Err(MessageParseErr::MissingParams(s.to_string()));
                 };
-                Ok(Message::Notice {
-                    targets: targets
-                        .split(',')
-                        .map(|s| s.to_string())
-                        .collect::<Vec<_>>(),
-                    msg: msg.to_string(),
-                })
+                let targets = expect_target_param!(targets);
+                let msg = expect_string_param!(msg);
+                Ok(Message::Notice { targets, msg })
             }
             "WHO" => {
                 todo!()
@@ -539,7 +583,7 @@ impl Message {
                 let mut msg = name.to_string();
                 for param in params.iter() {
                     msg.push(' ');
-                    msg.push_str(param.as_str());
+                    msg.push_str(param.to_irc_string().as_str());
                 }
                 msg
             }
@@ -549,35 +593,69 @@ impl Message {
     }
 }
 
-// TODO: parse lists nicely too
-fn parse_params(s: &str) -> Vec<String> {
-    let mut params = vec![];
+#[derive(Debug)]
+pub enum Param {
+    String(String),
+    List(Vec<String>),
+}
 
-    let mut s = s.trim_start_matches(' ');
-    // split off params by spaces
-    while let Some((param, rest)) = s.split_once(' ') {
-        // NOTE: if a parameter starts with a `:`, the rest of the message  is a parameter. `:`
-        // is OPTIONAL if it's not necessary to disambiguate.
-        if param.starts_with(':') {
-            params.push(s[1..].to_string());
-            // we have handled it all, exit
-            return params;
-        } else {
-            // TODO: remove spaces
-            params.push(param.to_string());
-            // remove all spaces that are after this param
-            s = rest.trim_start_matches(' ');
+impl Param {
+    /// returns the param as a &str, if it was a normal string param
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Param::String(s) => Some(s),
+            Param::List(_) => None,
         }
     }
 
-    // if the loop falls through there is only one param left, push it
-    // cannot use a trim function, `::meow` as a final param means that the param is `:meow` but
-    // trim would remove all counts of `:`
-    if s.starts_with(':') {
-        s = &s[1..];
+    pub fn as_list(&self) -> Option<&[String]> {
+        match self {
+            Param::String(_) => None,
+            Param::List(list) => Some(list),
+        }
     }
-    s = s.trim_end_matches(' ');
-    params.push(s.to_string());
+
+    pub fn to_irc_string(&self) -> String {
+        match self {
+            Param::String(s) => s.to_owned(),
+            Param::List(args) => args.join(","),
+        }
+    }
+}
+
+// TODO: parse lists nicely too
+fn parse_params(s: &str) -> Vec<Param> {
+    let mut params = vec![];
+
+    let mut s = s.trim_start_matches(' ');
+    while s.len() > 0 {
+        let end_idx = s.find(' ').unwrap_or(s.len());
+        let param = &s[..end_idx];
+
+        // NOTE: if a parameter starts with a `:`, the rest of the message is a parameter. the last
+        // parameter may omit the `:` if it's not necessary to disambiguate.
+        if param.starts_with(':') {
+            params.push(Param::String(s[1..].to_string()));
+            // ate the rest of the params, return early
+            return params;
+        } else if param.contains(',') {
+            let parts = param
+                .split(',')
+                .filter_map(|s| {
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s.to_string())
+                    }
+                })
+                .collect::<Vec<_>>();
+            params.push(Param::List(parts));
+        } else {
+            params.push(Param::String(param.to_string()));
+        }
+
+        s = s[end_idx..].trim_start_matches(' ');
+    }
 
     params
 }
