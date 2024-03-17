@@ -20,29 +20,6 @@ macro_rules! expect_string_param {
     }};
 }
 
-// expects a parameter to be a list parameter, and extracts it, otherwise returns an invalid param
-// err.
-macro_rules! expect_list_param {
-    ($expr:expr) => {{
-        let param = $expr;
-        match param.as_list() {
-            Some(list) => list.to_vec(),
-            None => return Err(MessageParseErr::InvalidParams),
-        }
-    }};
-}
-
-macro_rules! expect_target_param {
-    ($expr:expr) => {{
-        let param = $expr;
-        match param {
-            Param::String(s) if s == "*" => vec![String::from("*")],
-            Param::String(_) => return Err(MessageParseErr::InvalidParams),
-            Param::List(list) => list.to_vec(),
-        }
-    }};
-}
-
 pub struct Source(String);
 
 impl Source {
@@ -349,13 +326,9 @@ impl Message {
             }
             "JOIN" => {
                 let (channels, keys) = match args.as_slice() {
-                    [] => {
-                        return Err(MessageParseErr::MissingParams(s.to_string()));
-                    }
-                    [channels] => (expect_list_param!(channels), vec![]),
-                    [channels, keys, ..] => {
-                        (expect_list_param!(channels), expect_list_param!(keys))
-                    }
+                    [] => return Err(MessageParseErr::MissingParams(s.to_string())),
+                    [channels] => (channels.optional_list(), vec![]),
+                    [channels, keys, ..] => (channels.optional_list(), keys.optional_list()),
                 };
 
                 if keys.len() > channels.len() {
@@ -373,7 +346,7 @@ impl Message {
                 let [channels, rest @ ..] = args.as_slice() else {
                     return Err(MessageParseErr::MissingParams(s.to_string()));
                 };
-                let channels = expect_list_param!(channels);
+                let channels = channels.optional_list();
                 let reason = match rest.first() {
                     Some(param) => Some(expect_string_param!(param)),
                     None => None,
@@ -429,7 +402,7 @@ impl Message {
                 let [targets, msg, ..] = args.as_slice() else {
                     return Err(MessageParseErr::MissingParams(s.to_string()));
                 };
-                let targets = expect_target_param!(targets);
+                let targets = targets.optional_list();
                 let msg = expect_string_param!(msg);
                 Ok(Message::Privmsg { targets, msg })
             }
@@ -437,7 +410,7 @@ impl Message {
                 let [targets, msg, ..] = args.as_slice() else {
                     return Err(MessageParseErr::MissingParams(s.to_string()));
                 };
-                let targets = expect_target_param!(targets);
+                let targets = targets.optional_list();
                 let msg = expect_string_param!(msg);
                 Ok(Message::Notice { targets, msg })
             }
@@ -612,6 +585,16 @@ impl Param {
         match self {
             Param::String(_) => None,
             Param::List(list) => Some(list),
+        }
+    }
+
+    /// returns a vec containing the single string parameter, if the param is a string, or returns
+    /// the list parameter if the param is a list. this is useful for places where a list is
+    /// optional, like JOIN.
+    pub fn optional_list(&self) -> Vec<String> {
+        match self {
+            Param::String(s) => vec![s.to_string()],
+            Param::List(list) => list.to_owned(),
         }
     }
 
