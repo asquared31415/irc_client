@@ -1,6 +1,8 @@
 #![feature(never_type, never_type_fallback, let_chains)]
 
+use clap::Parser;
 use color_eyre::eyre::Result;
+use log::info;
 
 use crate::{
     client_state::Client,
@@ -15,25 +17,36 @@ mod reader;
 mod ui;
 
 const ADDR: &str = "localhost:6667";
-const NICK: &str = "rust_client";
+
+#[derive(Debug, Parser)]
+#[command(version)]
+struct Cli {
+    #[arg(long)]
+    nick: String,
+}
 
 fn main() -> Result<()> {
     env_logger::init();
     color_eyre::install()?;
 
+    let cli = Cli::parse();
+    info!("{:#?}", cli);
+
+    let nick = cli.nick;
+
     // TODO: probobaly join creation and starting, or at least defer tcp connection until start
-    let client = Client::new(ADDR, NICK)?;
+    let client = Client::new(ADDR, nick.as_str())?;
     client.start(|sender| {
         // code to run upon starting.
         sender.send(IRCMessage {
             tags: None,
             source: None,
-            message: Message::Nick(String::from(NICK)),
+            message: Message::Nick(nick.clone()),
         })?;
         sender.send(IRCMessage {
             tags: None,
             source: None,
-            message: Message::User(String::from(NICK), String::from(NICK)),
+            message: Message::User(nick.clone(), nick.clone()),
         })?;
 
         Ok(())

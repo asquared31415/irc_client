@@ -15,7 +15,7 @@ use crate::{
     command::Command,
     ext::*,
     irc_message::{IRCMessage, Message},
-    reader::IrcMessageReader,
+    reader::{IrcMessageReader, MessagePollErr},
     ui::TerminalUi,
 };
 
@@ -77,10 +77,20 @@ impl Client {
 
                 let mut inner = || -> eyre::Result<()> {
                     trace!("reading");
-                    let msg = msg_reader.recv()?;
-                    debug!("got msg {:#?}", msg);
-                    msg_sender.send(msg)?;
-                    Ok(())
+                    match msg_reader.recv() {
+                        Ok(msg) => {
+                            debug!("got msg {:#?}", msg);
+                            msg_sender.send(msg)?;
+                            Ok(())
+                        }
+                        // IRC parsing errors can just be reported without exiting
+                        Err(MessagePollErr::IrcParseErr(e)) => {
+                            error!("{}", e);
+                            Ok(())
+                        }
+                        // pass fatal errors up to be reported
+                        Err(e) => Err(e)?,
+                    }
                 };
 
                 loop {
@@ -136,7 +146,7 @@ impl Client {
 
     fn on_msg(&mut self, msg: IRCMessage, sender: &Sender<IRCMessage>) -> Result<()> {
         let state = &mut *self.state.try_lock().map_err(|_| eyre!(""))?;
-        debug!("state on msg: {:#?}", state);
+        trace!("state on msg: {:#?}", state);
         match msg.message {
             // =====================
             // PING
@@ -176,6 +186,7 @@ impl Client {
                     nick: nick.to_string(),
                     channels: IndexSet::new(),
                 });
+                self.ui.writeln("CONNECTED".bright_green().to_string())?;
             }
 
             // =====================
@@ -250,7 +261,7 @@ impl Client {
                 warn!("unhandled msg {:?}", unk);
             }
         }
-        debug!("state after msg: {:#?}", state);
+        trace!("state after msg: {:#?}", state);
         Ok(())
     }
 
@@ -267,13 +278,13 @@ impl Client {
             ClientState::Connected(ConnectedState { channels, .. }) => {
                 if let Some((_, input)) = input.split_prefix('/') {
                     let cmd = Command::parse(input)?;
-                    debug!("cmd {:?}", cmd);
+                    trace!("cmd {:?}", cmd);
                     cmd.handle(state, sender)?;
 
                     Ok(())
                 } else {
-                    debug!("not a /: {:?}", input);
-                    debug!("channels: {:?}", channels);
+                    trace!("not a /: {:?}", input);
+                    trace!("channels: {:?}", channels);
                     if channels.len() == 0 {
                         warn!("cannot send a message to 0 channels");
                     } else if channels.len() > 1 {

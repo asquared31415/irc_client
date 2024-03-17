@@ -354,7 +354,15 @@ impl Message {
                 Ok(Message::Part(channels, reason))
             }
             "TOPIC" => {
-                todo!()
+                let [channel, rest @ ..] = args.as_slice() else {
+                    return Err(MessageParseErr::MissingParams(s.to_string()));
+                };
+                let channel = expect_string_param!(channel);
+                let topic = match rest.first() {
+                    Some(t) => Some(expect_string_param!(t)),
+                    None => None,
+                };
+                Ok(Message::Topic(channel, topic))
             }
             "NAMES" => {
                 todo!()
