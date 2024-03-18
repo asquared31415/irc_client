@@ -256,6 +256,8 @@ pub enum Message {
         args: Vec<Param>,
     },
 
+    Raw(String),
+
     // an unknown message
     Unknown(String, Vec<Param>),
 }
@@ -559,6 +561,8 @@ impl Message {
             Message::Numeric { num, .. } => {
                 return Err(MessageToStringErr::ClientMayNotCreate(num.to_string()));
             }
+
+            Message::Raw(text) => text.to_string(),
 
             Message::Unknown(name, params) => {
                 let mut msg = name.to_string();

@@ -12,12 +12,12 @@ use crate::{
 #[derive(Debug)]
 pub enum Command {
     Join(String),
+    /// send raw text to the IRC server
+    Raw(String),
 }
 
 #[derive(Debug, Error)]
 pub enum CommandParseErr {
-    #[error("missing a command")]
-    MissingCommand,
     #[error("command expected {} args, found {}", .0, .1)]
     IncorrectArgCount(u8, u8),
     #[error("unknown command {}", .0)]
@@ -27,12 +27,13 @@ pub enum CommandParseErr {
 impl Command {
     pub fn parse<S: AsRef<str>>(s: S) -> Result<Self, CommandParseErr> {
         let s = s.as_ref().to_lowercase();
-        let parts = s.split(' ').filter(|s| !s.is_empty()).collect::<Vec<_>>();
-        let [cmd, args @ ..] = parts.as_slice() else {
-            return Err(CommandParseErr::MissingCommand);
-        };
+        let (cmd, args_str) = s.split_once(' ').unwrap_or((s.as_str(), ""));
+        let args = args_str
+            .split(' ')
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>();
 
-        match *cmd {
+        match cmd {
             "join" => {
                 if args.len() != 1 {
                     return Err(CommandParseErr::IncorrectArgCount(1, args.len() as u8));
@@ -53,6 +54,13 @@ impl Command {
 
                 Ok(Command::Join(channels[0].to_string()))
             }
+            "raw" => {
+                if args.len() == 0 {
+                    return Err(CommandParseErr::IncorrectArgCount(1, 0));
+                }
+
+                Ok(Command::Raw(args_str.to_string()))
+            }
             _ => Err(CommandParseErr::UnknownCommand(cmd.to_string())),
         }
     }
@@ -68,6 +76,17 @@ impl Command {
                     tags: None,
                     source: None,
                     message: Message::Join(vec![(channel.to_string(), None)]),
+                })?;
+            }
+            Command::Raw(text) => {
+                let ClientState::Connected(ConnectedState { .. }) = state else {
+                    bail!("can only join when connected");
+                };
+
+                sender.send(IRCMessage {
+                    tags: None,
+                    source: None,
+                    message: Message::Raw(text.to_string()),
                 })?;
             }
         }
