@@ -5,7 +5,7 @@ use log::warn;
 use thiserror::Error;
 
 use crate::{
-    client_state::{ClientState, ConnectedState},
+    client::{ClientState, ConnectedState},
     irc_message::{IRCMessage, Message},
 };
 

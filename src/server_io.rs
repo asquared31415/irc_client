@@ -1,22 +1,47 @@
-use std::{io, io::Read, net::TcpStream};
+use std::io;
 
 use thiserror::Error;
 
-use crate::irc_message::{IRCMessage, IrcParseErr};
+use crate::{
+    ext::{ReadWrite, WriteExt},
+    irc_message::{IRCMessage, IrcParseErr, MessageToStringErr},
+};
 
 // the size of the receive buffer to allocate, in bytes.
 const BUFFER_SIZE: usize = 4096;
 
-pub struct IrcMessageReader {
-    connection: TcpStream,
+#[derive(Debug, Error)]
+pub enum MessagePollErr {
+    #[error("the connection was closed")]
+    Closed,
+    #[error("polling was unsuccessful after {} retries", .0)]
+    TooManyRetries(u8),
+    #[error("server sent invalid UTF-8")]
+    InvalidUTF8,
+    #[error(transparent)]
+    IrcParseErr(#[from] IrcParseErr),
+    #[error(transparent)]
+    Io(#[from] io::Error),
+}
+
+#[derive(Debug, Error)]
+pub enum MsgWriteErr {
+    #[error(transparent)]
+    MessageToStrErr(#[from] MessageToStringErr),
+    #[error(transparent)]
+    Io(#[from] io::Error),
+}
+
+pub struct ServerIo {
+    connection: Box<dyn ReadWrite + Send>,
     buffer: Box<[u8; BUFFER_SIZE]>,
     /// if a message is truncated by the buffer, place the beginning of the message here to be
     /// concatenated with the end.
     message_fragment: Option<String>,
 }
 
-impl IrcMessageReader {
-    pub fn new(connection: TcpStream) -> Self {
+impl ServerIo {
+    pub fn new(connection: Box<dyn ReadWrite + Send>) -> Self {
         Self {
             connection,
             buffer: Box::new([0_u8; BUFFER_SIZE]),
@@ -24,7 +49,15 @@ impl IrcMessageReader {
         }
     }
 
-    pub fn recv(&mut self) -> Result<IRCMessage, MessagePollErr> {
+    pub fn write(&mut self, msg: &IRCMessage) -> Result<(), MsgWriteErr> {
+        self.connection
+            .write_all_blocking(msg.to_irc_string()?.as_bytes())?;
+        Ok(())
+    }
+
+    // returns Ok(Some(msg)) if a message was read, Ok(None) if the read would block, and Err(e) if
+    // another error occurred
+    pub fn recv(&mut self) -> Result<Option<IRCMessage>, MessagePollErr> {
         // read from the stream until there's a full message
         loop {
             const MAX_RETRIES: u8 = 5;
@@ -41,7 +74,9 @@ impl IrcMessageReader {
                         break count;
                     }
                     Err(e) => {
-                        if e.kind() != io::ErrorKind::Interrupted {
+                        if e.kind() == io::ErrorKind::WouldBlock {
+                            return Ok(None);
+                        } else if e.kind() != io::ErrorKind::Interrupted {
                             return Err(e.into());
                         } else if retry_count > MAX_RETRIES {
                             return Err(MessagePollErr::TooManyRetries(retry_count));
@@ -80,7 +115,7 @@ impl IrcMessageReader {
                         }
 
                         let msg = IRCMessage::parse(msg_str.as_str())?;
-                        return Ok(msg);
+                        return Ok(Some(msg));
                     }
                     // there was not a CRLF, add it to the buffer
                     None => {
@@ -94,18 +129,4 @@ impl IrcMessageReader {
             }
         }
     }
-}
-
-#[derive(Debug, Error)]
-pub enum MessagePollErr {
-    #[error("the connection was closed")]
-    Closed,
-    #[error("polling was unsuccessful after {} retries", .0)]
-    TooManyRetries(u8),
-    #[error("server sent invalid UTF-8")]
-    InvalidUTF8,
-    #[error(transparent)]
-    IrcParseErr(#[from] IrcParseErr),
-    #[error(transparent)]
-    Io(#[from] io::Error),
 }

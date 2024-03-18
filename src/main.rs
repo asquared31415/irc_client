@@ -2,18 +2,15 @@
 
 use clap::Parser;
 use color_eyre::eyre::Result;
-use log::info;
+use log::debug;
 
-use crate::{
-    client_state::Client,
-    irc_message::{IRCMessage, Message},
-};
+use crate::irc_message::{IRCMessage, Message};
 
-mod client_state;
+mod client;
 mod command;
 mod ext;
 mod irc_message;
-mod reader;
+mod server_io;
 mod ui;
 
 #[derive(Debug, Parser)]
@@ -21,6 +18,9 @@ mod ui;
 struct Cli {
     #[arg(long)]
     addr: String,
+
+    #[arg(long)]
+    tls: bool,
 
     #[arg(long)]
     nick: String,
@@ -31,13 +31,11 @@ fn main() -> Result<()> {
     color_eyre::install()?;
 
     let cli = Cli::parse();
-    info!("{:#?}", cli);
+    debug!("{:#?}", cli);
 
-    let Cli { addr, nick } = cli;
+    let Cli { addr, tls, nick } = cli;
 
-    // TODO: probobaly join creation and starting, or at least defer tcp connection until start
-    let client = Client::new(addr.as_str(), nick.as_str())?;
-    client.start(|sender| {
+    client::start(addr.as_str(), nick.as_str(), tls, |sender| {
         // code to run upon starting.
         sender.send(IRCMessage {
             tags: None,
