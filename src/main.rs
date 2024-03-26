@@ -2,9 +2,11 @@
 
 use clap::Parser;
 use color_eyre::eyre::Result;
-use log::debug;
 
-use crate::irc_message::{IRCMessage, Message};
+use crate::{
+    client::ExitReason,
+    irc_message::{IRCMessage, Message},
+};
 
 mod client;
 mod command;
@@ -27,15 +29,11 @@ struct Cli {
 }
 
 fn main() -> Result<()> {
-    env_logger::init();
     color_eyre::install()?;
 
-    let cli = Cli::parse();
-    debug!("{:#?}", cli);
+    let Cli { addr, tls, nick } = Cli::parse();
 
-    let Cli { addr, tls, nick } = cli;
-
-    client::start(addr.as_str(), nick.as_str(), tls, |sender| {
+    match client::start(addr.as_str(), nick.as_str(), tls, |sender| {
         // code to run upon starting.
         sender.send(IRCMessage {
             tags: None,
@@ -49,7 +47,11 @@ fn main() -> Result<()> {
         })?;
 
         Ok(())
-    })?
-    // client.start() never returns
-    // PROGRAM SHOULD NEVER EXIT EXCEPT BY USER REQUEST
+    }) {
+        // client.start() never returns Ok
+        Ok(_) => unreachable!(),
+        // no need to report anything on a requsted quit
+        Err(ExitReason::Quit) => return Ok(()),
+        Err(e) => return Err(e.into()),
+    }
 }

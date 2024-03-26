@@ -1,7 +1,6 @@
 use std::sync::mpsc::Sender;
 
 use eyre::bail;
-use log::warn;
 use thiserror::Error;
 
 use crate::{
@@ -42,14 +41,14 @@ impl Command {
                 // note: channels.len() is at least one, split always returns at least one element
                 let channels = args[0].split(',').collect::<Vec<_>>();
                 if channels.len() > 1 {
-                    warn!("only joining one channel at a time is implemented");
+                    // TODO
                 }
 
                 let channel = channels[0];
                 if channel.is_empty() {
                     // NOTE: users are required to put the channel prefix, so an empty channel name
                     // is a bug
-                    warn!("empty channel name");
+                    // TODO: err
                 }
 
                 Ok(Command::Join(channels[0].to_string()))

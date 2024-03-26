@@ -3,7 +3,6 @@ use core::{
     fmt::{Debug, Display},
 };
 
-use log::{debug, error};
 use thiserror::Error;
 
 use crate::ext::StrExt as _;
@@ -28,6 +27,10 @@ impl Source {
             .split_once('!')
             .map(|(name, _)| name)
             .unwrap_or(self.0.as_str())
+    }
+
+    pub fn new(source: String) -> Self {
+        Self(source)
     }
 }
 
@@ -76,7 +79,6 @@ impl IRCMessage {
     /// parses a message from a string. the string must contain only a single message. the string
     /// must not contain CRLF.
     pub fn parse(s: &str) -> Result<Self, IrcParseErr> {
-        debug!("parsing {:?}", s);
         if s.contains("\r\n") {
             return Err(IrcParseErr::InteriorCRLF);
         }
@@ -488,7 +490,6 @@ impl Message {
             }
             Message::Join(channels) => {
                 if channels.len() == 0 {
-                    error!("JOIN message had no channels");
                     todo!()
                 }
 

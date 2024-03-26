@@ -1,4 +1,9 @@
+use core::{
+    sync::atomic::{self, AtomicBool},
+    time::Duration,
+};
 use std::{
+    io,
     net::TcpStream,
     sync::{
         mpsc,
@@ -6,22 +11,34 @@ use std::{
         Arc, Mutex,
     },
     thread,
+    time::{Instant, SystemTime},
 };
 
-use color_eyre::eyre::Result;
-use eyre::{bail, eyre};
+use eyre::{bail, eyre, Context};
 use indexmap::IndexSet;
-use log::*;
-use owo_colors::OwoColorize;
+use ratatui::backend::{Backend, CrosstermBackend};
 use rustls::{pki_types::ServerName, ClientConfig, ClientConnection, RootCertStore, StreamOwned};
+use thiserror::Error;
 
 use crate::{
     command::Command,
     ext::*,
-    irc_message::{IRCMessage, Message},
+    irc_message::{IRCMessage, Message, Source},
     server_io::ServerIo,
-    ui::TerminalUi,
+    ui::{InputStatus, TerminalUi},
 };
+
+#[derive(Debug, Error)]
+pub enum ExitReason {
+    #[error("quit requested")]
+    Quit,
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error(transparent)]
+    Other(#[from] eyre::Report),
+}
+
+static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// spawns threads for the reading and writing parts of the client and begins processing the
 /// connection.
@@ -29,10 +46,10 @@ pub fn start(
     addr: &str,
     nick: &str,
     tls: bool,
-    init: impl Fn(&Sender<IRCMessage>) -> Result<()>,
-) -> Result<!> {
+    init: impl Fn(&Sender<IRCMessage>) -> eyre::Result<()>,
+) -> Result<!, ExitReason> {
     let Some((name, _)) = addr.split_once(':') else {
-        bail!("unable to determine host name for TLS");
+        return Err(eyre!("unable to determine host name for TLS"))?;
     };
 
     // set non-blocking so that reads and writes can happen on one thread
@@ -47,12 +64,21 @@ pub fn start(
                 .with_root_certificates(root_store)
                 .with_no_client_auth(),
         );
-        let server_name = ServerName::try_from(name.to_string())?;
-        let client = ClientConnection::new(config, server_name)?;
+        let server_name =
+            ServerName::try_from(name.to_string()).wrap_err("could not parse server name")?;
+        let client =
+            ClientConnection::new(config, server_name).wrap_err("could not create connection")?;
         Box::new(StreamOwned::new(client, stream))
     } else {
         Box::new(stream)
     };
+
+    let state = Arc::new(Mutex::new(ClientState::Registration(RegistrationState {
+        requested_nick: nick.to_string(),
+    })));
+    let ui = Arc::new(Mutex::new(TerminalUi::new(CrosstermBackend::new(
+        io::stdout(),
+    ))?));
 
     // send to this channel to have a message written to the server
     let (write_sender, write_receiver) = mpsc::channel::<IRCMessage>();
@@ -62,13 +88,14 @@ pub fn start(
     // stream reader and writer thread
     // moves the stream into the thread
     let _ = thread::spawn({
+        let ui = Arc::clone(&ui);
         move || {
             let mut connection = ServerIo::new(stream);
             let mut inner = || -> eyre::Result<()> {
                 // write any necessary messages
                 match write_receiver.try_recv() {
                     Ok(msg) => {
-                        debug!("write msg {:#?}", msg);
+                        // debug!("write msg {:#?}", msg);
                         connection.write(&msg)?;
                     }
                     // if empty, move on to try to read
@@ -80,7 +107,7 @@ pub fn start(
 
                 match connection.recv() {
                     Ok(Some(msg)) => {
-                        debug!("recv msg {:#?}", msg);
+                        // debug!("recv msg {:#?}", msg);
                         msg_sender.send(msg)?;
                     }
                     // ignore no message found
@@ -92,11 +119,15 @@ pub fn start(
             };
 
             loop {
+                if QUIT_REQUESTED.load(atomic::Ordering::Relaxed) {
+                    return;
+                }
+
                 // if an error is encountered, log them and exit the thread
                 match inner() {
                     Ok(()) => {}
                     Err(e) => {
-                        error!("{}", e);
+                        ui.lock().unwrap().error(e.to_string());
                         return;
                     }
                 }
@@ -104,29 +135,52 @@ pub fn start(
         }
     });
 
-    let state = Arc::new(Mutex::new(ClientState::Registration(RegistrationState {
-        requested_nick: nick.to_string(),
-    })));
-    let ui = Arc::new(TerminalUi::new());
-
     // user interaction using stdin
     let _ = thread::spawn({
+        const INPUT_POLL_DELAY: Duration = Duration::from_millis(5);
         let state = Arc::clone(&state);
         let queue_sender = write_sender.clone();
         let ui = Arc::clone(&ui);
         move || {
-            let inner = || -> eyre::Result<()> {
-                let input = ui.read()?;
-                handle_input(&mut *state.lock().unwrap(), &queue_sender, input.trim())?;
+            #[derive(Debug)]
+            enum UiErr {
+                Quit,
+                Io(io::Error),
+                Other(eyre::Report),
+            }
+
+            let inner = || -> Result<(), UiErr> {
+                let input = match ui.lock().unwrap().input() {
+                    InputStatus::Complete(input) => input,
+                    // incomplete input, loop again
+                    InputStatus::Incomplete => return Ok(()),
+                    InputStatus::Quit => return Err(UiErr::Quit),
+                    InputStatus::IoErr(e) => return Err(UiErr::Io(e)),
+                };
+                handle_input(
+                    &mut *state.lock().unwrap(),
+                    &mut *ui.lock().unwrap(),
+                    &queue_sender,
+                    input.trim(),
+                )
+                .map_err(|r| UiErr::Other(r))?;
                 Ok(())
             };
 
             loop {
                 // if an error is encountered, log them and exit the thread
                 match inner() {
-                    Ok(()) => {}
-                    Err(e) => {
-                        error!("{}", e);
+                    Ok(()) => thread::sleep(INPUT_POLL_DELAY),
+                    Err(UiErr::Quit) => {
+                        QUIT_REQUESTED.store(true, atomic::Ordering::Relaxed);
+                        return;
+                    }
+                    Err(UiErr::Io(e)) => {
+                        ui.lock().unwrap().error(e.to_string());
+                        return;
+                    }
+                    Err(UiErr::Other(e)) => {
+                        ui.lock().unwrap().error(e.to_string());
                         return;
                     }
                 }
@@ -138,25 +192,42 @@ pub fn start(
     init(&write_sender)?;
 
     // main code that processes state as messages come in
+    // TODO: do processing on a thread too
     loop {
-        let msg = msg_receiver.recv()?;
-        trace!("handling msg");
-        let state = &mut *state
-            .try_lock()
-            .map_err(|_| eyre!("failed to lock state"))?;
-        on_msg(state, &ui, msg, &write_sender)?;
+        if QUIT_REQUESTED.load(atomic::Ordering::Relaxed) {
+            let mut ui = ui.lock().unwrap();
+            ui.writeln("exiting")?;
+            ui.disable();
+            return Err(ExitReason::Quit);
+        }
+
+        let msg = match msg_receiver.try_recv() {
+            Ok(msg) => msg,
+            Err(_) => continue,
+        };
+        on_msg(
+            &mut *state.lock().unwrap(),
+            &mut *ui.lock().unwrap(),
+            msg,
+            &write_sender,
+        )?;
     }
     // only terminates on error
     // TODO: have some way for the ui to request termination
 }
 
-fn on_msg(
+fn on_msg<B: Backend + io::Write>(
     state: &mut ClientState,
-    ui: &TerminalUi,
+    ui: &mut TerminalUi<B>,
     msg: IRCMessage,
     sender: &Sender<IRCMessage>,
-) -> Result<()> {
-    trace!("state on msg: {:#?}", state);
+) -> eyre::Result<()> {
+    // ui.writeln(
+    //     (SystemTime::now().duration_since(SystemTime::UNIX_EPOCH))
+    //         .unwrap()
+    //         .as_secs()
+    //         .to_string(),
+    // )?;
     match msg.message {
         // =====================
         // PING
@@ -172,7 +243,7 @@ fn on_msg(
         // =====================
         Message::Numeric { num: 1, args } => {
             let ClientState::Registration(RegistrationState { requested_nick }) = state else {
-                warn!("got a 001 when already registered");
+                ui.warn("001 when already registered");
                 return Ok(());
             };
 
@@ -185,10 +256,8 @@ fn on_msg(
 
             if requested_nick != nick {
                 ui.writeln(format!(
-                    "{}: requested nick {}, but got nick {}",
-                    "WARNING".bright_yellow(),
-                    requested_nick,
-                    nick
+                    "WARNING: requested nick {}, but got nick {}",
+                    requested_nick, nick
                 ))?;
             }
 
@@ -196,7 +265,7 @@ fn on_msg(
                 nick: nick.to_string(),
                 channels: IndexSet::new(),
             });
-            ui.writeln("CONNECTED".bright_green().to_string())?;
+            ui.writeln(format!("CONNECTED as {}", nick))?;
         }
 
         // =====================
@@ -216,17 +285,17 @@ fn on_msg(
             match msg.source.as_ref().map(|source| source.get_name()) {
                 Some(source) if source == nick => {
                     for chan in join_channels.iter() {
-                        ui.writeln(format!("{} {}", "JOINED".bright_blue(), chan))?;
+                        ui.writeln(format!("JOINED {}", chan))?;
                     }
                     channels.extend(join_channels);
                 }
                 Some(other) => {
                     for chan in join_channels.iter() {
-                        ui.writeln(format!("{} joined {}", other.bright_purple(), chan))?;
+                        ui.writeln(format!("{} joined {}", other, chan))?;
                     }
                 }
                 None => {
-                    warn!("JOIN msg without a source");
+                    ui.warn("JOIN msg without a source");
                 }
             }
         }
@@ -238,58 +307,57 @@ fn on_msg(
             msg: notice_msg, ..
         } => {
             // TODO: check whether target is channel vs user
-            ui.writeln(format!(
-                "{}{}",
-                msg.source
-                    .as_ref()
-                    .map(|source| format!("<{}> ", source.green()))
-                    .unwrap_or_default(),
-                notice_msg
-            ))?
+            write_msg(ui, msg.source.as_ref(), notice_msg.as_str())?;
         }
         Message::Notice {
             msg: notice_msg, ..
-        } => ui.writeln(format!(
-            "{}{} {}",
-            msg.source
-                .as_ref()
-                .map(|source| format!("{} ", source.green()))
-                .unwrap_or_default(),
-            "NOTICE".bright_yellow(),
-            notice_msg
-        ))?,
+        } => {
+            write_msg(
+                ui,
+                msg.source.as_ref(),
+                format!("NOTICE {}", notice_msg).as_str(),
+            )?;
+        }
 
         // =====================
         // UNKNOWN
         // =====================
         unk => {
-            warn!("unhandled msg {:?}", unk);
+            ui.warn(format!("unhandled msg {:?}", unk));
         }
     }
-    trace!("state after msg: {:#?}", state);
+    // ui.writeln(
+    //     (SystemTime::now().duration_since(SystemTime::UNIX_EPOCH))
+    //         .unwrap()
+    //         .as_secs()
+    //         .to_string(),
+    // )?;
     Ok(())
 }
 
-fn handle_input(state: &mut ClientState, sender: &Sender<IRCMessage>, input: &str) -> Result<()> {
+fn handle_input<B: Backend + io::Write>(
+    state: &mut ClientState,
+    ui: &mut TerminalUi<B>,
+    sender: &Sender<IRCMessage>,
+    input: &str,
+) -> eyre::Result<()> {
+    ui.debug(format!("input: {}", input));
     match state {
         ClientState::Registration(_) => {
-            warn!("input during registration NYI");
+            ui.warn("input during registration NYI");
             Ok(())
         }
-        ClientState::Connected(ConnectedState { channels, .. }) => {
+        ClientState::Connected(ConnectedState { nick, channels, .. }) => {
             if let Some((_, input)) = input.split_prefix('/') {
                 let cmd = Command::parse(input)?;
-                trace!("cmd {:?}", cmd);
                 cmd.handle(state, sender)?;
 
                 Ok(())
             } else {
-                trace!("not a /: {:?}", input);
-                trace!("channels: {:?}", channels);
                 if channels.len() == 0 {
-                    warn!("cannot send a message to 0 channels");
+                    ui.warn("cannot send a message to 0 channels");
                 } else if channels.len() > 1 {
-                    warn!("multiple channels NYI");
+                    ui.warn("multiple channels NYI");
                 } else {
                     sender.send(IRCMessage {
                         tags: None,
@@ -299,12 +367,30 @@ fn handle_input(state: &mut ClientState, sender: &Sender<IRCMessage>, input: &st
                             msg: input.to_string(),
                         },
                     })?;
+                    write_msg(ui, Some(&Source::new(nick.to_string())), input)?;
                 }
 
                 Ok(())
             }
         }
     }
+}
+
+fn write_msg<B: Backend + io::Write>(
+    ui: &mut TerminalUi<B>,
+    source: Option<&Source>,
+    msg: &str,
+) -> eyre::Result<()> {
+    ui.writeln(format!(
+        "{}{}",
+        source
+            .as_ref()
+            .map(|source| format!("<{}> ", source))
+            .unwrap_or_default(),
+        msg
+    ))?;
+
+    Ok(())
 }
 
 #[derive(Debug)]
