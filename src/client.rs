@@ -105,12 +105,12 @@ pub fn start(
                 }
 
                 match connection.recv() {
-                    Ok(Some(msg)) => {
-                        // debug!("recv msg {:#?}", msg);
-                        msg_sender.send(msg)?;
+                    Ok(messages) => {
+                        for msg in messages {
+                            // debug!("recv msg {:#?}", msg);
+                            msg_sender.send(msg)?;
+                        }
                     }
-                    // ignore no message found
-                    Ok(None) => {}
                     Err(e) => Err(e)?,
                 }
 
