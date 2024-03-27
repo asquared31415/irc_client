@@ -326,7 +326,11 @@ impl Message {
                 Ok(Message::Quit(reason))
             }
             "ERROR" => {
-                todo!()
+                let Some(reason) = args.first() else {
+                    return Err(MessageParseErr::MissingParams(s.to_string()));
+                };
+                let reason = expect_string_param!(reason);
+                Ok(Message::Error(reason))
             }
             "JOIN" => {
                 let (channels, keys) = match args.as_slice() {

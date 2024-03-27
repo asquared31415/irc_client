@@ -238,6 +238,15 @@ fn on_msg<B: Backend + io::Write>(
         })?,
 
         // =====================
+        // ERROR
+        // =====================
+        Message::Error(reason) => {
+            ui.error(reason.as_str());
+            // technically not a requested quit, but a requested quit exits silently
+            QUIT_REQUESTED.store(true, atomic::Ordering::Relaxed);
+        }
+
+        // =====================
         // REGISTRATION
         // =====================
         Message::Numeric { num: 1, args } => {
