@@ -11,7 +11,6 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::{Instant, SystemTime},
 };
 
 use eyre::{bail, eyre, Context};
@@ -23,7 +22,7 @@ use thiserror::Error;
 use crate::{
     command::Command,
     ext::*,
-    irc_message::{IRCMessage, Message, Source},
+    irc_message::{IRCMessage, Message, Param, Source},
     server_io::ServerIo,
     ui::{InputStatus, TerminalUi},
 };
@@ -247,10 +246,10 @@ fn on_msg<B: Backend + io::Write>(
                 return Ok(());
             };
 
-            let [nick, ..] = args.as_slice() else {
-                bail!("RPL_001 had no nick arg");
+            let [nick, msg, ..] = args.as_slice() else {
+                bail!("RPL_001 had no nick and msg arg");
             };
-            let Some(nick) = nick.as_str() else {
+            let (Some(nick), Some(msg)) = (nick.as_str(), msg.as_str()) else {
                 bail!("nick must be a string argument");
             };
 
@@ -265,7 +264,43 @@ fn on_msg<B: Backend + io::Write>(
                 nick: nick.to_string(),
                 channels: IndexSet::new(),
             });
-            ui.writeln(format!("CONNECTED as {}", nick))?;
+            ui.writeln(msg.to_string())?;
+        }
+
+        // =====================
+        // GREETING
+        // =====================
+        Message::Numeric { num: 2, args } => {
+            let [_, msg, ..] = args.as_slice() else {
+                bail!("RPL_YOURHOST missing msg");
+            };
+            let Some(msg) = msg.as_str() else {
+                bail!("RPL_YOURHOST msg not a string");
+            };
+            ui.writeln(msg.to_string())?;
+        }
+        Message::Numeric { num: 3, args } => {
+            let [_, msg, ..] = args.as_slice() else {
+                bail!("RPL_CREATED missing msg");
+            };
+            let Some(msg) = msg.as_str() else {
+                bail!("RPL_CREATED msg not a string");
+            };
+            ui.writeln(msg.to_string())?;
+        }
+        Message::Numeric { num: 4, args } => {
+            let [_, rest @ ..] = args.as_slice() else {
+                bail!("RPL_NUMERIC missing client arg");
+            };
+            let msg = rest
+                .iter()
+                .filter_map(Param::as_str)
+                .collect::<Vec<&str>>()
+                .join(" ");
+            ui.writeln(msg)?;
+        }
+        Message::Numeric { num: 5, args: _ } => {
+            //TODO: do we care about this?
         }
 
         // =====================

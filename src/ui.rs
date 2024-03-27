@@ -1,10 +1,5 @@
 use core::time::Duration;
-use std::{
-    collections::VecDeque,
-    fs::{self, File},
-    io,
-    io::Write,
-};
+use std::{collections::VecDeque, io};
 
 use crossterm::{
     event,
