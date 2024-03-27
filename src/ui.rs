@@ -1,5 +1,5 @@
 use core::time::Duration;
-use std::{collections::VecDeque, io};
+use std::{collections::VecDeque, fs::File, io, io::Write};
 
 use crossterm::{
     event,
@@ -178,11 +178,17 @@ impl<B: Backend + io::Write> TerminalUi<B> {
                     .drain(0..(self.main_text.len() - first_hidden_rev));
             }
             assert!(height <= main_rect.height);
+            // buffer the top of the screen with empty lines if it was not filled
+            for _ in 0..(main_rect.height - height) {
+                self.main_text.push_front(Line::from(""));
+            }
         }
 
         self.terminal.draw(|frame| {
-            let paragraph = Paragraph::new(Text::from(self.main_text.as_slices().0.to_vec()))
-                .wrap(Wrap { trim: false });
+            let paragraph = Paragraph::new(Text::from(
+                self.main_text.iter().cloned().collect::<Vec<_>>(),
+            ))
+            .wrap(Wrap { trim: false });
             frame.render_widget(paragraph, *main_rect);
             frame.render_widget(Span::from(self.input_buffer.clone()).on_blue(), *input_rect);
         })?;
@@ -192,7 +198,11 @@ impl<B: Backend + io::Write> TerminalUi<B> {
 }
 
 fn calc_line_height(text_rect: &Rect, line: &Line<'static>) -> u16 {
-    line.width().div_ceil(usize::from(text_rect.width)) as u16
+    // NOTE: the max makes sure that empty lines are considered to be at least 1 high
+    u16::max(
+        line.width().div_ceil(usize::from(text_rect.width)) as u16,
+        1,
+    )
 }
 
 #[derive(Debug)]
