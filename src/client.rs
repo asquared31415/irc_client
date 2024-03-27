@@ -344,6 +344,15 @@ fn on_msg<B: Backend + io::Write>(
             }
         }
 
+        Message::Quit(reason) => {
+            let Some(name) = msg.source.as_ref().map(Source::get_name) else {
+                bail!("QUIT msg had no source");
+            };
+            // NOTE: servers SHOULD always send a reason, but make sure
+            let reason = reason.unwrap_or(String::from("disconnected"));
+            ui.writeln(format!("{} quit: {}", name, reason))?;
+        }
+
         // =====================
         // MESSAGES
         // =====================
