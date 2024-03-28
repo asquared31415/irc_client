@@ -3,6 +3,7 @@ use core::{
     time::Duration,
 };
 use std::{
+    borrow::Cow,
     io,
     net::TcpStream,
     sync::{
@@ -15,13 +16,18 @@ use std::{
 
 use eyre::{bail, eyre, Context};
 use indexmap::IndexSet;
-use ratatui::backend::{Backend, CrosstermBackend};
+use ratatui::{
+    backend::{Backend, CrosstermBackend},
+    style::Color,
+    text::{Line, Span},
+};
 use rustls::{pki_types::ServerName, ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use thiserror::Error;
 
 use crate::{
     command::Command,
     ext::*,
+    handlers,
     irc_message::{IRCMessage, Message, Param, Source},
     server_io::ServerIo,
     ui::{InputStatus, TerminalUi},
@@ -368,8 +374,16 @@ fn on_msg<B: Backend + io::Write>(
             write_msg(
                 ui,
                 msg.source.as_ref(),
-                format!("NOTICE {}", notice_msg).as_str(),
+                Line::default()
+                    .spans([Span::styled("NOTICE", Color::Green), Span::from(notice_msg)]),
             )?;
+        }
+
+        // =====================
+        // OTHER NUMERIC REPLIES
+        // =====================
+        msg @ Message::Numeric { .. } => {
+            handlers::numeric::handle(msg, ui)?;
         }
 
         // =====================
@@ -429,20 +443,29 @@ fn handle_input<B: Backend + io::Write>(
     }
 }
 
-fn write_msg<B: Backend + io::Write>(
+fn write_msg<'a, B: Backend + io::Write>(
     ui: &mut TerminalUi<B>,
     source: Option<&Source>,
-    msg: &str,
+    line: impl Into<Line<'a>>,
 ) -> eyre::Result<()> {
-    ui.writeln(format!(
-        "{}{}",
-        source
-            .as_ref()
-            .map(|source| format!("<{}> ", source))
-            .unwrap_or_default(),
-        msg
-    ))?;
-
+    let source_spans = if let Some(source) = source {
+        vec![
+            Span::raw("<"),
+            Span::styled(source.to_string(), Color::Magenta),
+            Span::raw("> "),
+        ]
+    } else {
+        vec![]
+    };
+    let line = Line::default().spans(
+        source_spans.into_iter().chain(
+            line.into()
+                .spans
+                .into_iter()
+                .map(|s: Span<'_>| Span::styled(s.content.into_owned(), s.style)),
+        ),
+    );
+    ui.writeln(line)?;
     Ok(())
 }
 

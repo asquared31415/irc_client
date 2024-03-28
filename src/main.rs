@@ -10,7 +10,9 @@ use crate::{
 
 mod client;
 mod command;
+mod constants;
 mod ext;
+mod handlers;
 mod irc_message;
 mod server_io;
 mod ui;

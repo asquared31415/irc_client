@@ -412,7 +412,25 @@ impl Message {
                 todo!()
             }
             "MODE" => {
-                todo!()
+                let [target, rest @ ..] = args.as_slice() else {
+                    return Err(MessageParseErr::MissingParams(s.to_string()));
+                };
+                let target = expect_string_param!(target);
+
+                let mode = match rest {
+                    [] => None,
+                    [start @ .., last] => {
+                        let mut mode = String::new();
+                        for p in start {
+                            mode.push_str(p.to_irc_string().as_str());
+                            mode.push(' ');
+                        }
+                        mode.push_str(last.to_irc_string().as_str());
+                        Some(mode)
+                    }
+                };
+
+                Ok(Message::Mode { target, mode })
             }
             "PRIVMSG" => {
                 let [targets, msg, ..] = args.as_slice() else {
