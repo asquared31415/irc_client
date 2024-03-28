@@ -84,7 +84,13 @@ pub fn handle<B: Backend + io::Write>(msg: Message, ui: &mut TerminalUi<B>) -> e
         }
 
         _ => {
-            ui.warn(format!("unhandled numeric {:03}", num));
+            ui.warn(format!(
+                "unhandled numeric {} ({:03})",
+                crate::constants::numerics::ALL_NUMERICS
+                    .get(&num)
+                    .unwrap_or(&"UNKNOWN"),
+                num
+            ));
         }
     }
 

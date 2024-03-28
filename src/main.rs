@@ -1,4 +1,4 @@
-#![feature(never_type, never_type_fallback, let_chains)]
+#![feature(never_type, never_type_fallback, let_chains, lazy_cell)]
 
 use clap::Parser;
 use color_eyre::eyre::Result;
