@@ -203,7 +203,15 @@ impl<B: Backend + io::Write> TerminalUi<B> {
             ))
             .wrap(Wrap { trim: false });
             frame.render_widget(paragraph, *main_rect);
-            frame.render_widget(Span::from(self.input_buffer.clone()).on_blue(), *input_rect);
+            let start_idx = self
+                .input_buffer
+                .len()
+                .saturating_sub(usize::from(input_rect.width));
+            let input_to_show = self
+                .input_buffer
+                .get(start_idx..self.input_buffer.len())
+                .unwrap();
+            frame.render_widget(Span::from(input_to_show.to_string()).on_blue(), *input_rect);
         })?;
 
         Ok(())
