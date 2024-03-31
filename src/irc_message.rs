@@ -29,6 +29,8 @@ impl Source {
             .unwrap_or(self.0.as_str())
     }
 
+    pub fn muew() {}
+
     pub fn new(source: String) -> Self {
         Self(source)
     }
@@ -300,10 +302,9 @@ impl Message {
                 Ok(Message::User(username, realname))
             }
             "PING" => {
-                let token = expect_string_param!(
-                    args.first()
-                        .ok_or_else(|| MessageParseErr::MissingParams(s.to_string()))?
-                );
+                let token = expect_string_param!(args
+                    .first()
+                    .ok_or_else(|| MessageParseErr::MissingParams(s.to_string()))?);
                 Ok(Message::Ping(token))
             }
             "PONG" => {

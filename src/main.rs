@@ -36,7 +36,7 @@ fn main() -> Result<()> {
     let Cli { addr, tls, nick } = Cli::parse();
 
     match client::start(addr.as_str(), nick.as_str(), tls, |sender| {
-        // code to run upon starting.
+        //code to run upon starting.
         sender.send(IRCMessage {
             tags: None,
             source: None,

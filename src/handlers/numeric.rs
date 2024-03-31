@@ -1,6 +1,5 @@
 use std::io;
 
-use eyre::bail;
 use ratatui::backend::Backend;
 
 use crate::{irc_message::Message, ui::TerminalUi};
@@ -70,8 +69,16 @@ pub fn handle<B: Backend + io::Write>(msg: Message, ui: &mut TerminalUi<B>) -> e
                 ui.writeln(msg.to_string())?;
             }
         }
-        RPL_LOCALUSERS => {}
-        RPL_GLOBALUSERS => {}
+        RPL_LOCALUSERS => {
+            if let Some(msg) = args.last().and_then(|p| p.as_str()) {
+                ui.writeln(msg.to_string())?;
+            }
+        }
+        RPL_GLOBALUSERS => {
+            if let Some(msg) = args.last().and_then(|p| p.as_str()) {
+                ui.writeln(msg.to_string())?;
+            }
+        }
 
         // =======================
         // MOTD
@@ -83,6 +90,16 @@ pub fn handle<B: Backend + io::Write>(msg: Message, ui: &mut TerminalUi<B>) -> e
             ))?;
         }
 
+        // =======================
+        // modes
+        // =======================
+        RPL_UMODEIS => {
+            ui.writeln("TODO: RPL_UMODEIS")?;
+        }
+
+        // =======================
+        // fallback
+        // =======================
         _ => {
             ui.warn(format!(
                 "unhandled numeric {} ({:03})",

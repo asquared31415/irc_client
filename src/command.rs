@@ -1,3 +1,4 @@
+use core::sync::atomic;
 use std::sync::mpsc::Sender;
 
 use eyre::bail;
@@ -13,6 +14,7 @@ pub enum Command {
     Join(String),
     /// send raw text to the IRC server
     Raw(String),
+    Quit,
 }
 
 #[derive(Debug, Error)]
@@ -60,6 +62,7 @@ impl Command {
 
                 Ok(Command::Raw(args_str.to_string()))
             }
+            "quit" => Ok(Command::Quit),
             _ => Err(CommandParseErr::UnknownCommand(cmd.to_string())),
         }
     }
@@ -87,6 +90,9 @@ impl Command {
                     source: None,
                     message: Message::Raw(text.to_string()),
                 })?;
+            }
+            Command::Quit => {
+                crate::client::QUIT_REQUESTED.store(true, atomic::Ordering::Relaxed);
             }
         }
 

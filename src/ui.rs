@@ -18,7 +18,7 @@ pub struct TerminalUi<B: Backend + io::Write> {
     layout: Layout,
     main_text: VecDeque<Line<'static>>,
     input_buffer: String,
-
+    log_file: File,
     /// if this is true, the terminal is no longer functional and should not be used
     disabled: bool,
 }
@@ -32,18 +32,21 @@ impl<B: Backend + io::Write> TerminalUi<B> {
 
         // reserve 1 line at the bottom of the terminal
         let layout = Layout::vertical([Constraint::Fill(1), Constraint::Max(1)]);
-
+        let log_file = File::options().create(true).append(true).open("log.txt")?;
         Ok(Self {
             terminal,
             layout,
             main_text: VecDeque::with_capacity(25),
             input_buffer: String::new(),
+            log_file,
             disabled: false,
         })
     }
 
     pub fn writeln(&mut self, line: impl Into<Line<'static>>) -> eyre::Result<()> {
-        self.main_text.push_back(line.into());
+        let line = line.into();
+        self.log_file.write_all(format!("{}\n", line).as_bytes())?;
+        self.main_text.push_back(line);
         // update the screen
         self.render()?;
         Ok(())
@@ -51,6 +54,9 @@ impl<B: Backend + io::Write> TerminalUi<B> {
 
     pub fn debug(&mut self, msg: impl AsRef<str>) {
         const STYLE: Style = Style::new().fg(Color::DarkGray);
+        let _ = self
+            .log_file
+            .write_all(format!("{}\n", msg.as_ref()).as_bytes());
         self.main_text
             .push_back(Line::styled(format!("DEBUG: {}", msg.as_ref()), STYLE));
         self.render();
@@ -58,6 +64,9 @@ impl<B: Backend + io::Write> TerminalUi<B> {
 
     pub fn warn(&mut self, msg: impl AsRef<str>) {
         const STYLE: Style = Style::new().fg(Color::Yellow);
+        let _ = self
+            .log_file
+            .write_all(format!("{}\n", msg.as_ref()).as_bytes());
         self.main_text
             .push_back(Line::styled(format!("WARN: {}", msg.as_ref()), STYLE));
         self.render();
@@ -65,6 +74,10 @@ impl<B: Backend + io::Write> TerminalUi<B> {
 
     pub fn error(&mut self, msg: impl AsRef<str>) {
         const STYLE: Style = Style::new().fg(Color::Red);
+
+        let _ = self
+            .log_file
+            .write_all(format!("{}\n", msg.as_ref()).as_bytes());
         self.main_text
             .push_back(Line::styled(format!("ERROR: {}", msg.as_ref()), STYLE));
         self.render();

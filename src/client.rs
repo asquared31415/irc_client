@@ -43,7 +43,7 @@ pub enum ExitReason {
     Other(#[from] eyre::Report),
 }
 
-static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
+pub static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// spawns threads for the reading and writing parts of the client and begins processing the
 /// connection.
