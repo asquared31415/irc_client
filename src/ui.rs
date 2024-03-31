@@ -178,11 +178,14 @@ impl<B: Backend + io::Write> TerminalUi<B> {
             let mut height = 0;
             // NOTE: the index here is the index from the *back* of the vec
             if let Some(first_hidden_rev) = self.main_text.iter().rev().position(|line| {
-                let new_hight = calc_line_height(main_rect, line);
-                if height + new_hight > main_rect.height {
+                let new_height = line_wrapped_height(main_rect, line);
+                //let _ = self
+                //    .log_file
+                //    .write_all(format!("{}LINE:{}\n", new_height, line).as_bytes());
+                if height + new_height > main_rect.height {
                     return true;
                 } else {
-                    height += new_hight;
+                    height += new_height;
                     return false;
                 }
             }) {
@@ -218,12 +221,9 @@ impl<B: Backend + io::Write> TerminalUi<B> {
     }
 }
 
-fn calc_line_height(text_rect: &Rect, line: &Line<'static>) -> u16 {
-    // NOTE: the max makes sure that empty lines are considered to be at least 1 high
-    u16::max(
-        line.width().div_ceil(usize::from(text_rect.width)) as u16,
-        1,
-    )
+fn line_wrapped_height(text_rect: &Rect, line: &Line<'static>) -> u16 {
+    let p = Paragraph::new(line.clone()).wrap(Wrap { trim: false });
+    p.line_count(text_rect.width) as u16
 }
 
 #[derive(Debug)]
