@@ -10,12 +10,9 @@ use std::{
     thread,
 };
 
+use crossterm::style::Stylize;
 use eyre::{bail, eyre, Context};
 use indexmap::IndexSet;
-use ratatui::{
-    style::Color,
-    text::{Line, Span},
-};
 use rustls::{pki_types::ServerName, ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use thiserror::Error;
 
@@ -27,6 +24,7 @@ use crate::{
     server_io::ServerIo,
     ui::{
         layout::{Direction, Layout, Section, SectionKind},
+        rendering::Line,
         term::{InputStatus, TerminalUi},
     },
 };
@@ -373,11 +371,13 @@ fn on_msg(
         // =====================
         // MESSAGES
         // =====================
-        Message::Privmsg {
-            msg: notice_msg, ..
-        } => {
+        Message::Privmsg { msg: privmsg, .. } => {
             // TODO: check whether target is channel vs user
-            write_msg(ui, msg.source.as_ref(), notice_msg.as_str())?;
+            write_msg(
+                ui,
+                msg.source.as_ref(),
+                Line::new_without_style(privmsg).unwrap(),
+            )?;
         }
         Message::Notice {
             msg: notice_msg, ..
@@ -386,7 +386,8 @@ fn on_msg(
                 ui,
                 msg.source.as_ref(),
                 Line::default()
-                    .spans([Span::styled("NOTICE", Color::Green), Span::from(notice_msg)]),
+                    .push("NOTICE ".green())
+                    .push_unstyled(notice_msg),
             )?;
         }
 
@@ -465,7 +466,11 @@ fn handle_input(
                             },
                         })
                         .wrap_err("failed to send privmsg to writer thread")?;
-                    write_msg(ui, Some(&Source::new(nick.to_string())), input)?;
+                    write_msg(
+                        ui,
+                        Some(&Source::new(nick.to_string())),
+                        Line::default().push_unstyled(input),
+                    )?;
                 }
 
                 Ok(())
@@ -475,28 +480,19 @@ fn handle_input(
 }
 
 fn write_msg<'a>(
-    ui: &mut TerminalUi,
+    ui: &mut TerminalUi<'a>,
     source: Option<&Source>,
-    line: impl Into<Line<'a>>,
+    line: Line<'a>,
 ) -> eyre::Result<()> {
-    let source_spans = if let Some(source) = source {
-        vec![
-            Span::raw("<"),
-            Span::styled(source.to_string(), Color::Magenta),
-            Span::raw("> "),
-        ]
-    } else {
-        vec![]
-    };
-    let line = Line::default().spans(
-        source_spans.into_iter().chain(
-            line.into()
-                .spans
-                .into_iter()
-                .map(|s: Span<'_>| Span::styled(s.content.into_owned(), s.style)),
-        ),
-    );
-    ui.writeln(line)?;
+    let mut composed = Line::default();
+    if let Some(source) = source {
+        composed = composed
+            .push_unstyled("<")
+            .push(source.to_string().magenta())
+            .push_unstyled(">");
+    }
+    composed.extend(line.into_iter());
+    ui.writeln(composed)?;
     Ok(())
 }
 

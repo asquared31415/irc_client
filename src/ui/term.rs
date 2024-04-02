@@ -5,6 +5,7 @@ use crossterm::{
     cursor, event,
     event::{Event, KeyCode, KeyEvent, KeyEventKind},
     execute,
+    style::Stylize,
     terminal::{self, disable_raw_mode, enable_raw_mode, ClearType},
 };
 use eyre::bail;
@@ -12,13 +13,13 @@ use eyre::bail;
 use crate::ui::{
     layout::{Layout, Rect},
     rendering,
-    rendering::{DrawTextConfig, WrapMode},
+    rendering::{DrawTextConfig, Line, WrapMode},
 };
 
 pub struct TerminalUi<'a> {
     terminal: Box<dyn io::Write + 'a + Send>,
     layout: Layout,
-    main_text: VecDeque<String>,
+    main_text: VecDeque<Line<'a>>,
     input_buffer: String,
     log_file: File,
     /// if this is true, the terminal is no longer functional and should not be used
@@ -43,9 +44,9 @@ impl<'a> TerminalUi<'a> {
         })
     }
 
-    pub fn writeln(&mut self, line: impl Into<String>) -> eyre::Result<()> {
+    pub fn writeln(&mut self, line: impl Into<Line<'a>>) -> eyre::Result<()> {
         let line = line.into();
-        self.log_file.write_all(format!("{}\n", line).as_bytes())?;
+        // self.log_file.write_all(format!("{}\n", line).as_bytes())?;
         self.main_text.push_back(line);
         // update the screen
         self.render()?;
@@ -53,34 +54,32 @@ impl<'a> TerminalUi<'a> {
     }
 
     pub fn debug(&mut self, msg: impl Into<String>) {
-        //        const STYLE: Style = Style::new().fg(Color::DarkGray);
         let msg = msg.into();
-        let _ = self.log_file.write_all(format!("{}\n", msg).as_bytes());
-        self.main_text.push_back(format!("DEBUG: {}", msg));
+        let _ = self
+            .log_file
+            .write_all(format!("DEBUG {}\n", msg).as_bytes());
+        self.main_text
+            .push_back(Line::from(format!("DEBUG: {}", msg)));
         self.render();
     }
 
     pub fn warn(&mut self, msg: impl Into<String>) {
-        //        const STYLE: Style = Style::new().fg(Color::Yellow);
         let msg = msg.into();
-        let _ = self.log_file.write_all(format!("{}\n", msg).as_bytes());
-        self.main_text.push_back(format!("WARN: {}", msg));
+        let _ = self
+            .log_file
+            .write_all(format!("WARN {}\n", msg).as_bytes());
+        self.main_text
+            .push_back(Line::from(format!("WARN: {}", msg)));
 
         self.render();
     }
 
     pub fn error(&mut self, msg: impl Into<String>) {
-        //        const STYLE: Style = Style::new().fg(Color::Red);
         let msg = msg.into();
         let _ = self.log_file.write_all(format!("{}\n", msg).as_bytes());
-        self.main_text.push_back(format!("ERROR: {}", msg));
+        self.main_text
+            .push_back(Line::from(format!("ERROR: {}", msg)));
         self.render();
-    }
-
-    /// reports a fatal error. this function first disables raw mode and returns to the main buffer
-    /// so that the
-    pub fn fatal(&mut self, msg: impl Into<String>) {
-        self.disable();
     }
 
     pub fn input(&mut self) -> InputStatus {
@@ -182,10 +181,10 @@ impl<'a> TerminalUi<'a> {
             let mut height = 0;
             // NOTE: the index here is the index from the *back* of the vec
             if let Some(first_hidden_rev) = self.main_text.iter().rev().position(|line| {
-                let new_height = line_wrapped_height(main_rect, line.as_str());
-                //let _ = self
-                //    .log_file
-                //    .write_all(format!("{}LINE:{}\n", new_height, line).as_bytes());
+                let new_height = 1; // line_wrapped_height(main_rect, line.as_str());
+                let _ = self
+                    .log_file
+                    .write_all(format!("{}LINE:{}\n", new_height, line).as_bytes());
                 if height + new_height > main_rect.height {
                     return true;
                 } else {
@@ -200,15 +199,15 @@ impl<'a> TerminalUi<'a> {
             assert!(height <= main_rect.height);
             // buffer the top of the screen with empty lines if it was not filled
             for _ in 0..(main_rect.height - height) {
-                self.main_text.push_front(String::from(""));
+                self.main_text.push_front(Line::from(""));
             }
         }
 
         // TODO: save and restore cursor pos?
         execute!(self.terminal, terminal::Clear(ClearType::All))?;
 
-        self.log_file
-            .write_all(format!("lines: {:#?}\n", self.main_text).as_bytes())?;
+        // self.log_file
+        //     .write_all(format!("lines: {:#?}\n", self.main_text).as_bytes())?;
 
         let mut draw_rect = *main_rect;
         for line in self.main_text.iter() {
@@ -217,7 +216,7 @@ impl<'a> TerminalUi<'a> {
             let used = rendering::draw_text(
                 &mut self.terminal,
                 draw_rect,
-                line.clone(),
+                line,
                 DrawTextConfig {
                     wrap: WrapMode::Truncate,
                 },
@@ -233,7 +232,7 @@ impl<'a> TerminalUi<'a> {
         rendering::draw_text(
             &mut self.terminal,
             *input_rect,
-            self.input_buffer.clone(),
+            &Line::default().push(self.input_buffer.clone().white().on_blue()),
             DrawTextConfig {
                 wrap: WrapMode::Truncate,
             },
