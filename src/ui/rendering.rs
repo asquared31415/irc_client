@@ -1,6 +1,7 @@
-use std::io;
+use std::{fs::File, io, io::prelude::Write as _};
 
-use crossterm::execute;
+use crossterm::{cursor, execute};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::ui::layout::Rect;
 
@@ -20,6 +21,40 @@ pub enum WrapMode {
     CharacterWrap,
 }
 
-pub fn draw_text(writer: &mut impl io::Write, rect: &Rect, text: String, config: DrawTextConfig) {
-    // execute!()
+/// returns the number of lines drawn
+pub fn draw_text(
+    writer: &mut impl io::Write,
+    rect: Rect,
+    text: String,
+    config: DrawTextConfig,
+) -> eyre::Result<u16> {
+    let Rect {
+        x,
+        y,
+        width,
+        height: _,
+    } = rect;
+    execute!(writer, cursor::MoveTo(x, y))?;
+
+    let mut log_file = File::options()
+        .create(true)
+        .append(true)
+        .open("log_render.txt")?;
+    log_file.write_all(format!("pos: {:?}\n", cursor::position()?).as_bytes())?;
+
+    match config.wrap {
+        WrapMode::Truncate => {
+            // truncate to the first `width` graphemes
+            let truncated = text
+                .graphemes(true)
+                .take(usize::from(width))
+                .collect::<String>();
+            log_file.write_all(format!("{}\n", truncated).as_bytes())?;
+            write!(writer, "{}", truncated)?;
+            writer.flush()?;
+            Ok(1)
+        }
+        WrapMode::WordWrap => todo!(),
+        WrapMode::CharacterWrap => todo!(),
+    }
 }

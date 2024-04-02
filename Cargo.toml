@@ -15,6 +15,8 @@ rustls = "0.23.2"
 
 clap = { version = "4.4.18", features = ["derive"] }
 
+unicode-segmentation = "1.11.0"
+
 indexmap = "2.2.5"
-ratatui = {version = "0.26.1", features = ["unstable-rendered-line-info"]}
+ratatui = { version = "0.26.1", features = ["unstable-rendered-line-info"] }
 crossterm = "0.27.0"

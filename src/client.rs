@@ -13,7 +13,6 @@ use std::{
 use eyre::{bail, eyre, Context};
 use indexmap::IndexSet;
 use ratatui::{
-    backend::CrosstermBackend,
     style::Color,
     text::{Line, Span},
 };
@@ -77,10 +76,6 @@ pub fn start(
         Box::new(stream)
     };
 
-    let state = Arc::new(Mutex::new(ClientState::Registration(RegistrationState {
-        requested_nick: nick.to_string(),
-    })));
-
     let layout = Layout {
         direction: Direction::Vertical,
         sections: vec![
@@ -92,11 +87,12 @@ pub fn start(
             },
         ],
     };
-
-    let ui = Arc::new(Mutex::new(TerminalUi::new(
-        layout,
-        CrosstermBackend::new(io::stdout()),
-    )?));
+    let state = Arc::new(Mutex::new(ClientState {
+        ui: TerminalUi::new(layout, io::stdout())?,
+        conn_state: ConnectionState::Registration(RegistrationState {
+            requested_nick: nick.to_string(),
+        }),
+    }));
 
     // send to this channel to have a message written to the server
     let (write_sender, write_receiver) = mpsc::channel::<IRCMessage>();
@@ -106,7 +102,7 @@ pub fn start(
     // stream reader and writer thread
     // moves the stream into the thread
     let _ = thread::spawn({
-        let ui = Arc::clone(&ui);
+        let state = Arc::clone(&state);
         move || {
             let mut connection = ServerIo::new(stream);
 
@@ -145,7 +141,7 @@ pub fn start(
                 match res {
                     Ok(()) => {}
                     Err(e) => {
-                        ui.lock().unwrap().error(e.to_string());
+                        state.lock().unwrap().ui.error(e.to_string());
                         return;
                     }
                 }
@@ -157,7 +153,6 @@ pub fn start(
     let _ = thread::spawn({
         let state = Arc::clone(&state);
         let queue_sender = write_sender.clone();
-        let ui = Arc::clone(&ui);
         move || {
             loop {
                 // NOTE: other threads can sometimes set QUIT_REQUESTED
@@ -166,13 +161,11 @@ pub fn start(
                 }
 
                 let input = || -> Result<(), InputErr> {
-                    match ui.lock().unwrap().input() {
-                        InputStatus::Complete(input) => handle_input(
-                            &mut *state.lock().unwrap(),
-                            &mut *ui.lock().unwrap(),
-                            &queue_sender,
-                            input.trim(),
-                        ),
+                    let state = &mut *state.lock().unwrap();
+                    match state.ui.input() {
+                        InputStatus::Complete(input) => {
+                            handle_input(state, &queue_sender, input.trim())
+                        }
                         // incomplete input, loop again
                         InputStatus::Incomplete => Ok(()),
                         InputStatus::Quit => Err(InputErr::Quit),
@@ -188,11 +181,11 @@ pub fn start(
                         return;
                     }
                     Err(InputErr::Io(e)) => {
-                        ui.lock().unwrap().error(e.to_string());
+                        state.lock().unwrap().ui.error(e.to_string());
                         return;
                     }
                     Err(InputErr::Other(e)) => {
-                        ui.lock().unwrap().error(e.to_string());
+                        state.lock().unwrap().ui.error(e.to_string());
                         return;
                     }
                 }
@@ -207,7 +200,7 @@ pub fn start(
     // TODO: do processing on a thread too
     loop {
         if QUIT_REQUESTED.load(atomic::Ordering::Relaxed) {
-            let mut ui = ui.lock().unwrap();
+            let ui = &mut state.lock().unwrap().ui;
             let _ = ui.writeln("exiting");
             ui.disable();
             return Err(ExitReason::Quit);
@@ -219,11 +212,11 @@ pub fn start(
         };
 
         let state = &mut *state.lock().unwrap();
-        let ui = &mut *ui.lock().unwrap();
-
-        if let Err(report) = on_msg(state, ui, msg, &write_sender) {
+        if let Err(report) = on_msg(state, msg, &write_sender) {
             // panic!("MEOW");
-            let _ = ui.writeln(format!("ERROR unable to handle message: {}", report));
+            let _ = state
+                .ui
+                .writeln(format!("ERROR unable to handle message: {}", report));
             QUIT_REQUESTED.store(true, atomic::Ordering::Relaxed);
         }
     }
@@ -233,10 +226,10 @@ pub fn start(
 
 fn on_msg(
     state: &mut ClientState,
-    ui: &mut TerminalUi,
     msg: IRCMessage,
     sender: &Sender<IRCMessage>,
 ) -> eyre::Result<()> {
+    let ui = &mut state.ui;
     // ui.writeln(
     //     (SystemTime::now().duration_since(SystemTime::UNIX_EPOCH))
     //         .unwrap()
@@ -266,7 +259,11 @@ fn on_msg(
         // REGISTRATION
         // =====================
         Message::Numeric { num: 1, args } => {
-            let ClientState::Registration(RegistrationState { requested_nick }) = state else {
+            let ClientState {
+                conn_state: ConnectionState::Registration(RegistrationState { requested_nick }),
+                ..
+            } = state
+            else {
                 ui.warn("001 when already registered");
                 return Ok(());
             };
@@ -285,7 +282,7 @@ fn on_msg(
                 ))?;
             }
 
-            *state = ClientState::Connected(ConnectedState {
+            state.conn_state = ConnectionState::Connected(ConnectedState {
                 nick: nick.to_string(),
                 channels: IndexSet::new(),
             });
@@ -332,7 +329,11 @@ fn on_msg(
         // CHANNEL STATE
         // =====================
         Message::Join(join_channels) => {
-            let ClientState::Connected(ConnectedState { nick, channels }) = state else {
+            let ClientState {
+                conn_state: ConnectionState::Connected(ConnectedState { nick, channels }),
+                ..
+            } = state
+            else {
                 bail!("JOIN messages can only be processed when connected to a server");
             };
             let join_channels = join_channels
@@ -425,17 +426,23 @@ enum InputErr {
 
 fn handle_input(
     state: &mut ClientState,
-    ui: &mut TerminalUi,
     sender: &Sender<IRCMessage>,
     input: &str,
 ) -> Result<(), InputErr> {
+    let ui = &mut state.ui;
     ui.debug(format!("input: {}", input));
     match state {
-        ClientState::Registration(_) => {
+        ClientState {
+            conn_state: ConnectionState::Registration(..),
+            ..
+        } => {
             ui.warn("input during registration NYI");
             Ok(())
         }
-        ClientState::Connected(ConnectedState { nick, channels, .. }) => {
+        ClientState {
+            conn_state: ConnectionState::Connected(ConnectedState { nick, channels }),
+            ..
+        } => {
             if let Some((_, input)) = input.split_prefix('/') {
                 let cmd = Command::parse(input)
                     .wrap_err_with(|| format!("failed to parse command {:?}", input))?;
@@ -493,8 +500,13 @@ fn write_msg<'a>(
     Ok(())
 }
 
+pub struct ClientState<'a> {
+    pub ui: TerminalUi<'a>,
+    pub conn_state: ConnectionState,
+}
+
 #[derive(Debug)]
-pub enum ClientState {
+pub enum ConnectionState {
     Registration(RegistrationState),
     Connected(ConnectedState),
 }

@@ -173,8 +173,9 @@ impl<'a> TerminalUi<'a> {
         let [main_rect, input_rect] = layout.as_slice() else {
             bail!("incorrect number of components in split layout");
         };
-        self.log_file
-            .write_all(format!("main: {:#?}\ninput: {:#?}\n", main_rect, input_rect).as_bytes())?;
+        // self.log_file
+        //     .write_all(format!("main: {:#?}\ninput: {:#?}\n", main_rect,
+        // input_rect).as_bytes())?;
 
         // remove all lines that will not be visible after wrapping
         {
@@ -203,33 +204,40 @@ impl<'a> TerminalUi<'a> {
             }
         }
 
-        let (cursor_col, cursor_row) = cursor::position()?;
+        // TODO: save and restore cursor pos?
+        execute!(self.terminal, terminal::Clear(ClearType::All))?;
+
+        self.log_file
+            .write_all(format!("lines: {:#?}\n", self.main_text).as_bytes())?;
+
+        let mut draw_rect = *main_rect;
+        for line in self.main_text.iter() {
+            // self.log_file
+            //     .write_all(format!("rect: {:#?}\n", draw_rect).as_bytes())?;
+            let used = rendering::draw_text(
+                &mut self.terminal,
+                draw_rect,
+                line.clone(),
+                DrawTextConfig {
+                    wrap: WrapMode::Truncate,
+                },
+            )?;
+
+            draw_rect.y += used;
+            draw_rect.height -= used;
+        }
+
+        self.log_file
+            .write_all(format!("input: {:#?} {:#?}\n", self.input_buffer, input_rect).as_bytes())?;
 
         rendering::draw_text(
             &mut self.terminal,
-            main_rect,
-            String::from("MEOW"),
+            *input_rect,
+            self.input_buffer.clone(),
             DrawTextConfig {
-                wrap: WrapMode::WordWrap,
+                wrap: WrapMode::Truncate,
             },
-        );
-
-        // self.terminal.draw(|frame| {
-        //     let paragraph = Paragraph::new(Text::from(
-        //         self.main_text.iter().cloned().collect::<Vec<_>>(),
-        //     ))
-        //     .wrap(Wrap { trim: false });
-        //     frame.render_widget(paragraph, *main_rect);
-        //     let start_idx = self
-        //         .input_buffer
-        //         .len()
-        //         .saturating_sub(usize::from(input_rect.width));
-        //     let input_to_show = self
-        //         .input_buffer
-        //         .get(start_idx..self.input_buffer.len())
-        //         .unwrap();
-        //     frame.render_widget(Span::from(input_to_show.to_string()).on_blue(), *input_rect);
-        // })?;
+        )?;
 
         Ok(())
     }

@@ -5,7 +5,7 @@ use eyre::bail;
 use thiserror::Error;
 
 use crate::{
-    client::{ClientState, ConnectedState},
+    client::{ClientState, ConnectionState},
     irc_message::{IRCMessage, Message},
 };
 
@@ -70,7 +70,11 @@ impl Command {
     pub fn handle(&self, state: &mut ClientState, sender: &Sender<IRCMessage>) -> eyre::Result<()> {
         match self {
             Command::Join(channel) => {
-                let ClientState::Connected(ConnectedState { .. }) = state else {
+                let ClientState {
+                    conn_state: ConnectionState::Connected(..),
+                    ..
+                } = state
+                else {
                     bail!("can only join when connected");
                 };
 
@@ -81,7 +85,11 @@ impl Command {
                 })?;
             }
             Command::Raw(text) => {
-                let ClientState::Connected(ConnectedState { .. }) = state else {
+                let ClientState {
+                    conn_state: ConnectionState::Connected(..),
+                    ..
+                } = state
+                else {
                     bail!("can only join when connected");
                 };
 
