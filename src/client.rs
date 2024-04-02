@@ -84,15 +84,11 @@ pub fn start(
     let layout = Layout {
         direction: Direction::Vertical,
         sections: vec![
-            Section {
-                direction: Direction::Vertical,
+            Section::Leaf {
                 kind: SectionKind::Fill(1),
-                sub_sections: vec![],
             },
-            Section {
-                direction: Direction::Vertical,
+            Section::Leaf {
                 kind: SectionKind::Exact(1),
-                sub_sections: vec![],
             },
         ],
     };

@@ -5,10 +5,15 @@ pub struct Layout {
 }
 
 #[derive(Debug, Clone)]
-pub struct Section {
-    pub direction: Direction,
-    pub kind: SectionKind,
-    pub sub_sections: Vec<Section>,
+pub enum Section {
+    Leaf {
+        kind: SectionKind,
+    },
+    Node {
+        direction: Direction,
+        kind: SectionKind,
+        sub_sections: Vec<Section>,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -47,7 +52,6 @@ impl Layout {
 
         let mut rects = Vec::new();
 
-        let section_kinds = sections.iter().map(|s| s.kind).collect::<Vec<_>>();
         let (mut remaining, axis_start_pos, creation_fn) = match direction {
             Direction::Vertical => (
                 rect.height,
@@ -71,18 +75,25 @@ impl Layout {
             ),
         };
 
-        let mut sizes = section_kinds
+        let mut sizes = sections
             .iter()
-            .map(|kind| match kind {
-                SectionKind::Exact(size) if *size < remaining => {
-                    remaining -= size;
-                    SizeState::Resolved(*size)
+            .map(|section| {
+                let kind = match section {
+                    Section::Leaf { kind } => kind,
+                    Section::Node { kind, .. } => kind,
+                };
+
+                match kind {
+                    SectionKind::Exact(size) if *size < remaining => {
+                        remaining -= size;
+                        SizeState::Resolved(*size)
+                    }
+                    SectionKind::Exact(_) => SizeState::DoesNotFit,
+                    SectionKind::Fill(weight) => SizeState::WeightedFill(*weight),
                 }
-                SectionKind::Exact(_) => SizeState::DoesNotFit,
-                SectionKind::Fill(weight) => SizeState::WeightedFill(*weight),
             })
             .collect::<Vec<_>>();
-        dbg!(&sizes, remaining);
+
         let total_weight = u16::from(sizes.iter().fold(0, |acc, s| {
             acc + if let SizeState::WeightedFill(weight) = s {
                 *weight
@@ -90,7 +101,6 @@ impl Layout {
                 0
             }
         }));
-        dbg!(total_weight);
 
         // split remaining_height into total_weight sections
         // each segment gets `base` height to start, and then the first `rem` sections each
@@ -111,29 +121,31 @@ impl Layout {
 
         let mut split = vec![base; usize::from(total_weight)];
         split[..rem].iter_mut().for_each(|e| *e += 1);
-        dbg!(&split);
 
+        // fix up the remaining sizes that need to be weighted
         for size in sizes.iter_mut() {
             if let SizeState::WeightedFill(weight) = size {
                 *size = SizeState::Resolved(split.drain(..usize::from(*weight)).sum());
             }
         }
-        dbg!(&sizes);
 
+        // convert the sizes into rects and recurse as needed
         let mut pos = axis_start_pos;
         for (elem, section) in sizes.into_iter().zip(sections) {
-            dbg!(&elem, pos);
             match elem {
                 SizeState::Resolved(size) => {
                     let rect = creation_fn(pos, size);
-                    if section.sub_sections.len() > 0 {
-                        rects.extend(Layout::calc_recurse(
-                            section.direction,
-                            section.sub_sections,
-                            rect,
-                        ));
-                    } else {
-                        rects.push(rect);
+                    match section {
+                        Section::Leaf { .. } => {
+                            rects.push(rect);
+                        }
+                        Section::Node {
+                            direction,
+                            sub_sections,
+                            ..
+                        } => {
+                            rects.extend(Layout::calc_recurse(direction, sub_sections, rect));
+                        }
                     }
                     pos += size;
                 }

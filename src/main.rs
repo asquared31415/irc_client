@@ -36,26 +36,20 @@ fn main() -> Result<()> {
 
     if option_env!("RECT_DBG").is_some() {
         let layout = Layout {
-            direction: Direction::Horizontal,
+            direction: Direction::Vertical,
             sections: vec![
-                Section {
-                    direction: Direction::Vertical,
+                Section::Leaf {
                     kind: SectionKind::Exact(1),
-                    sub_sections: vec![],
                 },
-                Section {
+                Section::Node {
                     direction: Direction::Horizontal,
                     kind: SectionKind::Fill(1),
                     sub_sections: vec![
-                        Section {
-                            direction: Direction::Vertical,
+                        Section::Leaf {
                             kind: SectionKind::Fill(2),
-                            sub_sections: vec![],
                         },
-                        Section {
-                            direction: Direction::Vertical,
+                        Section::Leaf {
                             kind: SectionKind::Fill(1),
-                            sub_sections: vec![],
                         },
                     ],
                 },
