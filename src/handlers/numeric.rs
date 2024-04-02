@@ -1,10 +1,6 @@
-use std::io;
+use crate::{irc_message::Message, ui::term::TerminalUi};
 
-use ratatui::backend::Backend;
-
-use crate::{irc_message::Message, ui::TerminalUi};
-
-pub fn handle<B: Backend + io::Write>(msg: Message, ui: &mut TerminalUi<B>) -> eyre::Result<()> {
+pub fn handle(msg: Message, ui: &mut TerminalUi) -> eyre::Result<()> {
     let Message::Numeric { num, args } = msg else {
         unreachable!()
     };

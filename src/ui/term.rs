@@ -2,36 +2,36 @@ use core::time::Duration;
 use std::{collections::VecDeque, fs::File, io, io::Write};
 
 use crossterm::{
-    event,
+    cursor, event,
     event::{Event, KeyCode, KeyEvent, KeyEventKind},
     execute,
-    terminal::{self, disable_raw_mode, enable_raw_mode},
+    terminal::{self, disable_raw_mode, enable_raw_mode, ClearType},
 };
 use eyre::bail;
-use ratatui::{
-    prelude::*,
-    widgets::{Paragraph, Wrap},
+
+use crate::ui::{
+    layout::{Layout, Rect},
+    rendering,
+    rendering::{DrawTextConfig, WrapMode},
 };
 
-pub struct TerminalUi<B: Backend + io::Write> {
-    terminal: Terminal<B>,
+pub struct TerminalUi<'a> {
+    terminal: Box<dyn io::Write + 'a + Send>,
     layout: Layout,
-    main_text: VecDeque<Line<'static>>,
+    main_text: VecDeque<String>,
     input_buffer: String,
     log_file: File,
     /// if this is true, the terminal is no longer functional and should not be used
     disabled: bool,
 }
 
-impl<B: Backend + io::Write> TerminalUi<B> {
-    pub fn new(backend: B) -> io::Result<Self> {
-        let mut terminal = Terminal::new(backend)?;
-        execute!(terminal.backend_mut(), terminal::EnterAlternateScreen)?;
+impl<'a> TerminalUi<'a> {
+    pub fn new<W: io::Write + 'a + Send>(layout: Layout, writer: W) -> io::Result<Self> {
+        let mut terminal = Box::new(writer) as Box<dyn io::Write + Send>;
+        execute!(terminal, terminal::EnterAlternateScreen)?;
         enable_raw_mode()?;
-        terminal.clear()?;
+        execute!(terminal, terminal::Clear(ClearType::Purge))?;
 
-        // reserve 1 line at the bottom of the terminal
-        let layout = Layout::vertical([Constraint::Fill(1), Constraint::Max(1)]);
         let log_file = File::options().create(true).append(true).open("log.txt")?;
         Ok(Self {
             terminal,
@@ -43,7 +43,7 @@ impl<B: Backend + io::Write> TerminalUi<B> {
         })
     }
 
-    pub fn writeln(&mut self, line: impl Into<Line<'static>>) -> eyre::Result<()> {
+    pub fn writeln(&mut self, line: impl Into<String>) -> eyre::Result<()> {
         let line = line.into();
         self.log_file.write_all(format!("{}\n", line).as_bytes())?;
         self.main_text.push_back(line);
@@ -52,35 +52,35 @@ impl<B: Backend + io::Write> TerminalUi<B> {
         Ok(())
     }
 
-    pub fn debug(&mut self, msg: impl AsRef<str>) {
-        const STYLE: Style = Style::new().fg(Color::DarkGray);
-        let _ = self
-            .log_file
-            .write_all(format!("{}\n", msg.as_ref()).as_bytes());
-        self.main_text
-            .push_back(Line::styled(format!("DEBUG: {}", msg.as_ref()), STYLE));
+    pub fn debug(&mut self, msg: impl Into<String>) {
+        //        const STYLE: Style = Style::new().fg(Color::DarkGray);
+        let msg = msg.into();
+        let _ = self.log_file.write_all(format!("{}\n", msg).as_bytes());
+        self.main_text.push_back(format!("DEBUG: {}", msg));
         self.render();
     }
 
-    pub fn warn(&mut self, msg: impl AsRef<str>) {
-        const STYLE: Style = Style::new().fg(Color::Yellow);
-        let _ = self
-            .log_file
-            .write_all(format!("{}\n", msg.as_ref()).as_bytes());
-        self.main_text
-            .push_back(Line::styled(format!("WARN: {}", msg.as_ref()), STYLE));
+    pub fn warn(&mut self, msg: impl Into<String>) {
+        //        const STYLE: Style = Style::new().fg(Color::Yellow);
+        let msg = msg.into();
+        let _ = self.log_file.write_all(format!("{}\n", msg).as_bytes());
+        self.main_text.push_back(format!("WARN: {}", msg));
+
         self.render();
     }
 
-    pub fn error(&mut self, msg: impl AsRef<str>) {
-        const STYLE: Style = Style::new().fg(Color::Red);
-
-        let _ = self
-            .log_file
-            .write_all(format!("{}\n", msg.as_ref()).as_bytes());
-        self.main_text
-            .push_back(Line::styled(format!("ERROR: {}", msg.as_ref()), STYLE));
+    pub fn error(&mut self, msg: impl Into<String>) {
+        //        const STYLE: Style = Style::new().fg(Color::Red);
+        let msg = msg.into();
+        let _ = self.log_file.write_all(format!("{}\n", msg).as_bytes());
+        self.main_text.push_back(format!("ERROR: {}", msg));
         self.render();
+    }
+
+    /// reports a fatal error. this function first disables raw mode and returns to the main buffer
+    /// so that the
+    pub fn fatal(&mut self, msg: impl Into<String>) {
+        self.disable();
     }
 
     pub fn input(&mut self) -> InputStatus {
@@ -162,23 +162,26 @@ impl<B: Backend + io::Write> TerminalUi<B> {
     }
 
     pub fn disable(&mut self) {
-        execute!(self.terminal.backend_mut(), terminal::LeaveAlternateScreen)
+        execute!(self.terminal, terminal::LeaveAlternateScreen)
             .expect("unable to leave alternate screen");
         disable_raw_mode().expect("unable to disable raw mode");
         self.disabled = true;
     }
 
     fn render(&mut self) -> eyre::Result<()> {
-        let [main_rect, input_rect] = &*self.layout.split(self.terminal.size()?) else {
+        let layout = self.layout.calc(terminal::size()?);
+        let [main_rect, input_rect] = layout.as_slice() else {
             bail!("incorrect number of components in split layout");
         };
+        self.log_file
+            .write_all(format!("main: {:#?}\ninput: {:#?}\n", main_rect, input_rect).as_bytes())?;
 
         // remove all lines that will not be visible after wrapping
         {
             let mut height = 0;
             // NOTE: the index here is the index from the *back* of the vec
             if let Some(first_hidden_rev) = self.main_text.iter().rev().position(|line| {
-                let new_height = line_wrapped_height(main_rect, line);
+                let new_height = line_wrapped_height(main_rect, line.as_str());
                 //let _ = self
                 //    .log_file
                 //    .write_all(format!("{}LINE:{}\n", new_height, line).as_bytes());
@@ -196,34 +199,46 @@ impl<B: Backend + io::Write> TerminalUi<B> {
             assert!(height <= main_rect.height);
             // buffer the top of the screen with empty lines if it was not filled
             for _ in 0..(main_rect.height - height) {
-                self.main_text.push_front(Line::from(""));
+                self.main_text.push_front(String::from(""));
             }
         }
 
-        self.terminal.draw(|frame| {
-            let paragraph = Paragraph::new(Text::from(
-                self.main_text.iter().cloned().collect::<Vec<_>>(),
-            ))
-            .wrap(Wrap { trim: false });
-            frame.render_widget(paragraph, *main_rect);
-            let start_idx = self
-                .input_buffer
-                .len()
-                .saturating_sub(usize::from(input_rect.width));
-            let input_to_show = self
-                .input_buffer
-                .get(start_idx..self.input_buffer.len())
-                .unwrap();
-            frame.render_widget(Span::from(input_to_show.to_string()).on_blue(), *input_rect);
-        })?;
+        let (cursor_col, cursor_row) = cursor::position()?;
+
+        rendering::draw_text(
+            &mut self.terminal,
+            main_rect,
+            String::from("MEOW"),
+            DrawTextConfig {
+                wrap: WrapMode::WordWrap,
+            },
+        );
+
+        // self.terminal.draw(|frame| {
+        //     let paragraph = Paragraph::new(Text::from(
+        //         self.main_text.iter().cloned().collect::<Vec<_>>(),
+        //     ))
+        //     .wrap(Wrap { trim: false });
+        //     frame.render_widget(paragraph, *main_rect);
+        //     let start_idx = self
+        //         .input_buffer
+        //         .len()
+        //         .saturating_sub(usize::from(input_rect.width));
+        //     let input_to_show = self
+        //         .input_buffer
+        //         .get(start_idx..self.input_buffer.len())
+        //         .unwrap();
+        //     frame.render_widget(Span::from(input_to_show.to_string()).on_blue(), *input_rect);
+        // })?;
 
         Ok(())
     }
 }
 
-fn line_wrapped_height(text_rect: &Rect, line: &Line<'static>) -> u16 {
-    let p = Paragraph::new(line.clone()).wrap(Wrap { trim: false });
-    p.line_count(text_rect.width) as u16
+fn line_wrapped_height(text_rect: &Rect, line: &str) -> u16 {
+    1
+    // let p = Paragraph::new(line.clone()).wrap(Wrap { trim: false });
+    // p.line_count(text_rect.width) as u16
 }
 
 #[derive(Debug)]
