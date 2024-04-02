@@ -1,5 +1,7 @@
 #![feature(never_type, never_type_fallback, let_chains, lazy_cell)]
 
+use std::sync::mpsc::Sender;
+
 use clap::Parser;
 use color_eyre::eyre::Result;
 
@@ -29,6 +31,9 @@ struct Cli {
 
     #[arg(long)]
     nick: String,
+
+    #[arg(long)]
+    twitch_token: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -61,10 +66,23 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let Cli { addr, tls, nick } = Cli::parse();
+    let Cli {
+        addr,
+        tls,
+        nick,
+        twitch_token,
+    } = Cli::parse();
 
-    match client::start(addr.as_str(), nick.as_str(), tls, |sender| {
-        //code to run upon starting.
+    //code to run upon starting.
+    let client_on_start = |sender: &Sender<IRCMessage>| {
+        if let Some(token) = twitch_token.as_ref() {
+            sender.send(IRCMessage {
+                tags: None,
+                source: None,
+                message: Message::Pass(token.to_string()),
+            })?;
+        }
+
         sender.send(IRCMessage {
             tags: None,
             source: None,
@@ -77,7 +95,9 @@ fn main() -> Result<()> {
         })?;
 
         Ok(())
-    }) {
+    };
+
+    match client::start(addr.as_str(), nick.as_str(), tls, client_on_start) {
         // client.start() never returns Ok
         Ok(_) => unreachable!(),
         // no need to report anything on a requsted quit
