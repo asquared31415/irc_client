@@ -1,4 +1,9 @@
-use crate::{irc_message::Message, ui::term::TerminalUi};
+use crossterm::style::Stylize;
+
+use crate::{
+    irc_message::Message,
+    ui::{rendering::Line, term::TerminalUi},
+};
 
 pub fn handle(msg: Message, ui: &mut TerminalUi) -> eyre::Result<()> {
     let Message::Numeric { num, args } = msg else {
@@ -80,10 +85,15 @@ pub fn handle(msg: Message, ui: &mut TerminalUi) -> eyre::Result<()> {
         // MOTD
         // =======================
         ERR_NOMOTD => {
-            ui.writeln(format!(
-                "no MOTD: {}",
-                args.get(2).and_then(|p| p.as_str()).unwrap_or("")
-            ))?;
+            ui.writeln(
+                Line::default().push(
+                    format!(
+                        "no MOTD: {}",
+                        args.get(2).and_then(|p| p.as_str()).unwrap_or("<MISSING>")
+                    )
+                    .yellow(),
+                ),
+            )?;
         }
 
         // =======================

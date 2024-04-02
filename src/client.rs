@@ -139,7 +139,7 @@ pub fn start(
                 match res {
                     Ok(()) => {}
                     Err(e) => {
-                        state.lock().unwrap().ui.error(e.to_string());
+                        state.lock().unwrap().ui.error(e.to_string()).unwrap();
                         return;
                     }
                 }
@@ -179,11 +179,11 @@ pub fn start(
                         return;
                     }
                     Err(InputErr::Io(e)) => {
-                        state.lock().unwrap().ui.error(e.to_string());
+                        state.lock().unwrap().ui.error(e.to_string()).unwrap();
                         return;
                     }
                     Err(InputErr::Other(e)) => {
-                        state.lock().unwrap().ui.error(e.to_string());
+                        state.lock().unwrap().ui.error(e.to_string()).unwrap();
                         return;
                     }
                 }
@@ -248,7 +248,7 @@ fn on_msg(
         // ERROR
         // =====================
         Message::Error(reason) => {
-            ui.error(reason.as_str());
+            ui.error(reason.as_str())?;
             // technically not a requested quit, but a requested quit exits silently
             QUIT_REQUESTED.store(true, atomic::Ordering::Relaxed);
         }
@@ -262,7 +262,7 @@ fn on_msg(
                 ..
             } = state
             else {
-                ui.warn("001 when already registered");
+                ui.warn("001 when already registered")?;
                 return Ok(());
             };
 
@@ -344,17 +344,26 @@ fn on_msg(
             match msg.source.as_ref().map(|source| source.get_name()) {
                 Some(source) if source == nick => {
                     for chan in join_channels.iter() {
-                        ui.writeln(format!("JOINED {}", chan))?;
+                        ui.writeln(
+                            Line::default()
+                                .push("joined ".green())
+                                .push(chan.clone().dark_blue()),
+                        )?;
                     }
                     channels.extend(join_channels);
                 }
                 Some(other) => {
                     for chan in join_channels.iter() {
-                        ui.writeln(format!("{} joined {}", other, chan))?;
+                        ui.writeln(
+                            Line::default()
+                                .push(other.magenta())
+                                .push(" joined ".green())
+                                .push(chan.clone().dark_blue()),
+                        )?;
                     }
                 }
                 None => {
-                    ui.warn("JOIN msg without a source");
+                    ui.warn("JOIN msg without a source")?;
                 }
             }
         }
