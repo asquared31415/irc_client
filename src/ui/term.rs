@@ -175,7 +175,7 @@ impl<'a> TerminalUi<'a> {
         //     .write_all(format!("main: {:#?}\ninput: {:#?}\n", main_rect,
         // input_rect).as_bytes())?;
 
-        const MAIN_TEXT_WRAP_MODE: WrapMode = WrapMode::Truncate;
+        const MAIN_TEXT_WRAP_MODE: WrapMode = WrapMode::WordWrap;
 
         // remove all lines that will not be visible after wrapping
         {

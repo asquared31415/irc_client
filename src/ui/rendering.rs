@@ -66,7 +66,8 @@ impl<'a> Line<'a> {
         match wrap {
             WrapMode::Truncate => NonZeroU16::new(1).unwrap(),
             WrapMode::WordWrap | WrapMode::CharacterWrap => {
-                NonZeroU16::new(self.wrap(wrap, width).len() as u16).unwrap()
+                let lines = self.wrap(wrap, width);
+                NonZeroU16::new(usize::max(lines.len(), 1) as u16).unwrap()
             }
         }
     }
@@ -97,8 +98,32 @@ impl<'a> Line<'a> {
                 vec![ret]
             }
             // FIXME: implement this
-            WrapMode::WordWrap => vec![],
-            WrapMode::CharacterWrap => vec![],
+            WrapMode::WordWrap => {
+                let mut remaining_width = width;
+                let mut lines = vec![vec![]];
+                for span in self.content.iter() {
+                    let unstyled = span.content.to_string();
+                    let mut words = unstyled.split_word_bounds().peekable();
+                    while let Some(word) = words.next() {
+                        if word.len() <= usize::from(remaining_width) {
+                            lines
+                                .last_mut()
+                                .unwrap()
+                                .push(StyledContent::new(span.style, word.to_string()));
+                            remaining_width -= word.len() as u16;
+                        } else {
+                            // if a word can't fit, wrap to the next line
+                            lines.push(vec![StyledContent::new(span.style, word.to_string())]);
+                            remaining_width = width;
+                        }
+                    }
+                }
+
+                lines
+            }
+            WrapMode::CharacterWrap => {
+                vec![]
+            }
         }
     }
 }
