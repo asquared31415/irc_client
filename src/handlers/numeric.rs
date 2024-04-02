@@ -82,7 +82,7 @@ pub fn handle(msg: Message, ui: &mut TerminalUi) -> eyre::Result<()> {
         ERR_NOMOTD => {
             ui.writeln(format!(
                 "no MOTD: {}",
-                args.first().and_then(|p| p.as_str()).unwrap_or("")
+                args.get(2).and_then(|p| p.as_str()).unwrap_or("")
             ))?;
         }
 
