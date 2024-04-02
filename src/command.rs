@@ -100,6 +100,11 @@ impl Command {
                 })?;
             }
             Command::Quit => {
+                sender.send(IRCMessage {
+                    tags: None,
+                    source: None,
+                    message: Message::Quit(None),
+                })?;
                 crate::client::QUIT_REQUESTED.store(true, atomic::Ordering::Relaxed);
             }
         }

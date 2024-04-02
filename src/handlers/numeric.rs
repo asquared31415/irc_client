@@ -21,7 +21,7 @@ pub fn handle(msg: Message, ui: &mut TerminalUi) -> eyre::Result<()> {
                 return Ok(());
             };
             let Some(ops): Option<u16> = ops.as_str().and_then(|s| s.parse().ok()) else {
-                ui.warn("RPL_USEROP was not a u16");
+                ui.warn("RPL_USEROP was not a u16")?;
                 return Ok(());
             };
             let Some(msg) = msg.as_str() else {
@@ -36,7 +36,7 @@ pub fn handle(msg: Message, ui: &mut TerminalUi) -> eyre::Result<()> {
                 return Ok(());
             };
             let Some(ops): Option<u16> = ops.as_str().and_then(|s| s.parse().ok()) else {
-                ui.warn("RPL_LUSERUNKNOWN was not a u16");
+                ui.warn("RPL_LUSERUNKNOWN was not a u16")?;
                 return Ok(());
             };
             let Some(msg) = msg.as_str() else {
@@ -51,7 +51,7 @@ pub fn handle(msg: Message, ui: &mut TerminalUi) -> eyre::Result<()> {
                 return Ok(());
             };
             let Some(ops): Option<u16> = ops.as_str().and_then(|s| s.parse().ok()) else {
-                ui.warn("RPL_LUSERCHANNELS was not a u16");
+                ui.warn("RPL_LUSERCHANNELS was not a u16")?;
                 return Ok(());
             };
             let Some(msg) = msg.as_str() else {
@@ -90,7 +90,7 @@ pub fn handle(msg: Message, ui: &mut TerminalUi) -> eyre::Result<()> {
         // modes
         // =======================
         RPL_UMODEIS => {
-            ui.writeln("TODO: RPL_UMODEIS")?;
+            ui.warn("TODO: RPL_UMODEIS")?;
         }
 
         // =======================
@@ -103,7 +103,7 @@ pub fn handle(msg: Message, ui: &mut TerminalUi) -> eyre::Result<()> {
                     .get(&num)
                     .unwrap_or(&"UNKNOWN"),
                 num
-            ));
+            ))?;
         }
     }
 
