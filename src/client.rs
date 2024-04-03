@@ -16,7 +16,6 @@ use std::{
 use crossterm::style::Stylize;
 use eyre::{bail, eyre, Context};
 use indexmap::IndexSet;
-use log::{debug, trace};
 use rustls::{pki_types::ServerName, ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use thiserror::Error;
 
@@ -420,7 +419,7 @@ fn on_msg(
         // UNKNOWN
         // =====================
         unk => {
-            ui.warn(format!("unhandled msg {:?}", unk));
+            ui.warn(format!("unhandled msg {:?}", unk))?;
         }
     }
     // ui.writeln(
@@ -449,13 +448,13 @@ fn handle_input(
     input: &str,
 ) -> Result<(), InputErr> {
     let ui = &mut state.ui;
-    ui.debug(format!("input: {}", input));
+    ui.debug(format!("input: {}", input))?;
     match state {
         ClientState {
             conn_state: ConnectionState::Registration(..),
             ..
         } => {
-            ui.warn("input during registration NYI");
+            ui.warn("input during registration NYI")?;
             Ok(())
         }
         ClientState {
@@ -470,9 +469,9 @@ fn handle_input(
                 Ok(())
             } else {
                 if channels.len() == 0 {
-                    ui.warn("cannot send a message to 0 channels");
+                    ui.warn("cannot send a message to 0 channels")?;
                 } else if channels.len() > 1 {
-                    ui.warn("multiple channels NYI");
+                    ui.warn("multiple channels NYI")?;
                 } else {
                     sender
                         .send(IRCMessage {
