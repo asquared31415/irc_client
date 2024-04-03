@@ -12,8 +12,8 @@ use eyre::bail;
 
 use crate::ui::{
     layout::Layout,
-    rendering,
-    rendering::{DrawTextConfig, Line, WrapMode},
+    text,
+    text::{DrawTextConfig, Line, WrapMode},
 };
 
 pub struct TerminalUi<'a> {
@@ -239,7 +239,7 @@ impl<'a> TerminalUi<'a> {
 
         let mut draw_rect = *main_rect;
         for line in shown_lines.iter() {
-            let used = rendering::draw_text(
+            let used = text::draw_text(
                 &mut self.terminal,
                 draw_rect,
                 line,
@@ -263,7 +263,7 @@ impl<'a> TerminalUi<'a> {
             self.input_buffer[needed_buffer.abs() as usize..].to_string()
         };
 
-        rendering::draw_text(
+        text::draw_text(
             &mut self.terminal,
             *input_rect,
             &Line::default().push(input_text.white().on_blue()),

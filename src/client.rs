@@ -24,8 +24,8 @@ use crate::{
     server_io::ServerIo,
     ui::{
         layout::{Direction, Layout, Section, SectionKind},
-        rendering::Line,
         term::{InputStatus, TerminalUi},
+        text::Line,
     },
 };
 

@@ -2,7 +2,7 @@ use crossterm::style::Stylize;
 
 use crate::{
     irc_message::Message,
-    ui::{rendering::Line, term::TerminalUi},
+    ui::{term::TerminalUi, text::Line},
 };
 
 pub fn handle(msg: Message, ui: &mut TerminalUi) -> eyre::Result<()> {
