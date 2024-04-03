@@ -149,12 +149,12 @@ impl<'a> TerminalUi<'a> {
                     }
                 }
             }
-            Event::FocusGained
-            | Event::FocusLost
-            | Event::Mouse(_)
-            | Event::Paste(_)
-            | Event::Resize(_, _) => {
-                return InputStatus::Incomplete;
+            Event::Resize(_, _) => {
+                self.render();
+                InputStatus::Incomplete
+            }
+            Event::FocusGained | Event::FocusLost | Event::Mouse(_) | Event::Paste(_) => {
+                InputStatus::Incomplete
             }
         }
     }
