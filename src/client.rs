@@ -218,8 +218,6 @@ pub fn start(
             QUIT_REQUESTED.store(true, atomic::Ordering::Relaxed);
         }
     }
-    // only terminates on error
-    // TODO: have some way for the ui to request termination
 }
 
 fn on_msg(

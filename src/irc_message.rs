@@ -302,9 +302,10 @@ impl Message {
                 Ok(Message::User(username, realname))
             }
             "PING" => {
-                let token = expect_string_param!(args
-                    .first()
-                    .ok_or_else(|| MessageParseErr::MissingParams(s.to_string()))?);
+                let token = expect_string_param!(
+                    args.first()
+                        .ok_or_else(|| MessageParseErr::MissingParams(s.to_string()))?
+                );
                 Ok(Message::Ping(token))
             }
             "PONG" => {
@@ -476,7 +477,6 @@ impl Message {
             "LINKS" => {
                 todo!()
             }
-            // TODO: numerics
             other => match other.parse::<u16>() {
                 // numerics may only be 3 digits
                 Ok(num) if num <= 999 => Ok(Message::Numeric { num, args }),
@@ -642,7 +642,6 @@ impl Param {
     }
 }
 
-// TODO: parse lists nicely too
 fn parse_params(s: &str) -> Vec<Param> {
     let mut params = vec![];
 

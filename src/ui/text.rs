@@ -122,6 +122,7 @@ impl<'a> Line<'a> {
                 lines
             }
             WrapMode::CharacterWrap => {
+                // TODO: implement this
                 vec![]
             }
         }
