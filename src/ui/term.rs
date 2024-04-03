@@ -19,11 +19,11 @@ use crate::ui::{
 pub struct TerminalUi<'a> {
     terminal: Box<dyn io::Write + 'a + Send>,
     layout: Layout,
-    main_text: VecDeque<Line<'a>>,
+    history: VecDeque<Line<'a>>,
+    /// the last `scrollback` messages of the history should be hidden (would be below the screen)
+    scrollback: usize,
     input_buffer: String,
     log_file: File,
-    /// if this is true, the terminal is no longer functional and should not be used
-    disabled: bool,
 }
 
 impl<'a> TerminalUi<'a> {
@@ -37,10 +37,10 @@ impl<'a> TerminalUi<'a> {
         let mut this = Self {
             terminal,
             layout,
-            main_text: VecDeque::with_capacity(25),
+            history: VecDeque::new(),
+            scrollback: 0,
             input_buffer: String::new(),
             log_file,
-            disabled: false,
         };
         // force a re-render to move the cursor and add the input background
         let _ = this.render();
@@ -50,7 +50,7 @@ impl<'a> TerminalUi<'a> {
     pub fn writeln(&mut self, line: impl Into<Line<'a>>) -> eyre::Result<()> {
         let line = line.into();
         // self.log_file.write_all(format!("{}\n", line).as_bytes())?;
-        self.main_text.push_back(line);
+        self.history.push_back(line);
         // update the screen
         self.render()?;
         Ok(())
@@ -60,7 +60,7 @@ impl<'a> TerminalUi<'a> {
         let msg = msg.into();
         self.log_file
             .write_all(format!("DEBUG {}\n", msg).as_bytes())?;
-        self.main_text
+        self.history
             .push_back(Line::default().push(format!("DEBUG: {}", msg).dark_grey()));
         self.render()?;
         Ok(())
@@ -70,7 +70,7 @@ impl<'a> TerminalUi<'a> {
         let msg = msg.into();
         self.log_file
             .write_all(format!("WARN {}\n", msg).as_bytes())?;
-        self.main_text
+        self.history
             .push_back(Line::default().push(format!("WARN: {}", msg).yellow()));
 
         self.render()?;
@@ -80,7 +80,7 @@ impl<'a> TerminalUi<'a> {
     pub fn error(&mut self, msg: impl Into<String>) -> eyre::Result<()> {
         let msg = msg.into();
         self.log_file.write_all(format!("{}\n", msg).as_bytes())?;
-        self.main_text
+        self.history
             .push_back(Line::default().push(format!("ERROR: {}", msg).red()));
         self.render()?;
         Ok(())
@@ -163,7 +163,6 @@ impl<'a> TerminalUi<'a> {
         execute!(self.terminal, terminal::LeaveAlternateScreen)
             .expect("unable to leave alternate screen");
         disable_raw_mode().expect("unable to disable raw mode");
-        self.disabled = true;
     }
 
     pub fn render(&mut self) -> eyre::Result<()> {
@@ -177,43 +176,40 @@ impl<'a> TerminalUi<'a> {
 
         const MAIN_TEXT_WRAP_MODE: WrapMode = WrapMode::WordWrap;
 
-        // remove all lines that will not be visible after wrapping
-        {
-            let mut height = 0;
-            // NOTE: the index here is the index from the *back* of the vec
-            if let Some(first_hidden_rev) = self.main_text.iter().rev().position(|line| {
-                let new_height = line.wrapped_height(MAIN_TEXT_WRAP_MODE, main_rect.width);
-                let _ = self
-                    .log_file
-                    .write_all(format!("{}LINE:{}\n", new_height, line).as_bytes());
-                if height + new_height.get() > main_rect.height {
-                    return true;
+        let mut lines_used = 0;
+        let mut shown_lines = self
+            .history
+            .iter()
+            .rev()
+            .skip(self.scrollback)
+            .take_while(|line| {
+                let new_height = line
+                    .wrapped_height(MAIN_TEXT_WRAP_MODE, main_rect.width)
+                    .get();
+                if lines_used + new_height <= main_rect.height {
+                    lines_used += new_height;
+                    true
                 } else {
-                    height += new_height.get();
-                    return false;
+                    false
                 }
-            }) {
-                // remove all the lines that are no longer visible
-                self.main_text
-                    .drain(0..(self.main_text.len() - first_hidden_rev));
-            }
-            assert!(height <= main_rect.height);
-            // buffer the top of the screen with empty lines if it was not filled
-            for _ in 0..(main_rect.height - height) {
-                self.main_text.push_front(Line::from(""));
-            }
+            })
+            .collect::<Vec<_>>();
+        shown_lines.reverse();
+
+        // this has to be out here because it has to be in the same scope as the vec for borrow
+        // checker reasons, since the vec has to hold a reference since lines can't be moved or
+        // cloned.
+        let line = Line::default();
+        // pad shown_lines at the top to ensure that the last line it shows is placed at the bottom
+        for _ in 0..(main_rect.height - lines_used) {
+            shown_lines.insert(0, &line);
         }
 
         // TODO: save and restore cursor pos?
         execute!(self.terminal, terminal::Clear(ClearType::All))?;
 
-        // self.log_file
-        //     .write_all(format!("lines: {:#?}\n", self.main_text).as_bytes())?;
-
         let mut draw_rect = *main_rect;
-        for line in self.main_text.iter() {
-            // self.log_file
-            //     .write_all(format!("rect: {:#?}\n", draw_rect).as_bytes())?;
+        for line in shown_lines.iter() {
             let used = rendering::draw_text(
                 &mut self.terminal,
                 draw_rect,
@@ -226,9 +222,6 @@ impl<'a> TerminalUi<'a> {
             draw_rect.y += used;
             draw_rect.height -= used;
         }
-
-        self.log_file
-            .write_all(format!("input: {:#?} {:#?}\n", self.input_buffer, input_rect).as_bytes())?;
 
         let needed_buffer = input_rect.width as isize - self.input_buffer.len() as isize;
         let input_text = if needed_buffer > 0 {

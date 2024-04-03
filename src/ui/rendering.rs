@@ -12,7 +12,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::ui::layout::Rect;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Line<'a> {
     content: Vec<DynStyledContentWrapper<'a>>,
 }
@@ -174,6 +174,14 @@ pub struct DynStyledContentWrapper<'a> {
 impl<'a> Display for DynStyledContentWrapper<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", StyledContent::new(self.style, &self.content))
+    }
+}
+
+impl<'a> Debug for DynStyledContentWrapper<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("DynStyledContentWrapper")
+            .field(&self.to_string())
+            .finish()
     }
 }
 
