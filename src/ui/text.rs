@@ -97,25 +97,47 @@ impl<'a> Line<'a> {
                 // this truncates to one line always
                 vec![ret]
             }
-            // FIXME: implement this
             WrapMode::WordWrap => {
                 let mut remaining_width = width;
                 let mut lines = vec![vec![]];
+
+                fn handle_word(
+                    lines: &mut Vec<Vec<StyledContent<String>>>,
+                    width: u16,
+                    remaining_width: &mut u16,
+                    word: &str,
+                    style: ContentStyle,
+                ) {
+                    if word.len() <= usize::from(*remaining_width) {
+                        lines
+                            .last_mut()
+                            .unwrap()
+                            .push(StyledContent::new(style, word.to_string()));
+                        *remaining_width -= word.len() as u16;
+                    } else if word.len() > usize::from(width) {
+                        // this word will never fit on one line!
+                        let (this_line, next) = word.split_at(usize::from(*remaining_width));
+                        lines
+                            .last_mut()
+                            .unwrap()
+                            .push(StyledContent::new(style, this_line.to_string()));
+                        // wrap
+                        lines.push(vec![]);
+                        *remaining_width = width;
+                        handle_word(lines, width, remaining_width, next, style);
+                    } else {
+                        // if a word can't fit in the remaining space, but would be fine on the
+                        // next line, wrap
+                        lines.push(vec![StyledContent::new(style, word.to_string())]);
+                        *remaining_width = width;
+                    }
+                }
+
                 for span in self.content.iter() {
                     let unstyled = span.content.to_string();
                     let mut words = unstyled.split_word_bounds().peekable();
                     while let Some(word) = words.next() {
-                        if word.len() <= usize::from(remaining_width) {
-                            lines
-                                .last_mut()
-                                .unwrap()
-                                .push(StyledContent::new(span.style, word.to_string()));
-                            remaining_width -= word.len() as u16;
-                        } else {
-                            // if a word can't fit, wrap to the next line
-                            lines.push(vec![StyledContent::new(span.style, word.to_string())]);
-                            remaining_width = width;
-                        }
+                        handle_word(&mut lines, width, &mut remaining_width, word, span.style);
                     }
                 }
 
