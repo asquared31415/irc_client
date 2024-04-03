@@ -1,5 +1,6 @@
-use std::io;
+use std::{fs::File, io, io::Write};
 
+use log::debug;
 use thiserror::Error;
 
 use crate::{
@@ -48,8 +49,10 @@ impl ServerIo {
     }
 
     pub fn write(&mut self, msg: &IRCMessage) -> Result<(), MsgWriteErr> {
-        self.connection
-            .write_all_blocking(msg.to_irc_string()?.as_bytes())?;
+        let msg = msg.to_irc_string()?;
+        // remove the \r\n when writing to the log file
+        debug!("<- {:?}", &msg[..(msg.len() - 2)]);
+        self.connection.write_all_blocking(msg.as_bytes())?;
         Ok(())
     }
 
@@ -104,6 +107,7 @@ impl ServerIo {
 
             let msg = IRCMessage::parse(msg_str.as_str())?;
             msgs.push(msg);
+            debug!("-> {:?}", msg_str);
         }
 
         return Ok(msgs);

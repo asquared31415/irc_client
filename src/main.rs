@@ -1,6 +1,12 @@
-#![feature(never_type, never_type_fallback, let_chains, lazy_cell)]
+#![feature(
+    never_type,
+    never_type_fallback,
+    let_chains,
+    lazy_cell,
+    thread_id_value
+)]
 
-use std::sync::mpsc::Sender;
+use std::{sync::mpsc::Sender, thread, time::SystemTime};
 
 use clap::Parser;
 use color_eyre::eyre::Result;
@@ -36,8 +42,22 @@ struct Cli {
     twitch_token: Option<String>,
 }
 
+const LOG_PATH: &str = "irc_log.txt";
+
 fn main() -> Result<()> {
     color_eyre::install()?;
+    fern::Dispatch::new()
+        .format(|out, msg, record| {
+            out.finish(format_args!(
+                "[{}] [{:<5}] [{:016X}] {}",
+                humantime::format_rfc3339_millis(SystemTime::now()),
+                record.level(),
+                thread::current().id().as_u64(),
+                msg
+            ))
+        })
+        .chain(fern::log_file(LOG_PATH)?)
+        .apply()?;
 
     if option_env!("RECT_DBG").is_some() {
         let layout = Layout {
