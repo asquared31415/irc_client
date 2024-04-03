@@ -1,4 +1,7 @@
-use core::sync::atomic::{self, AtomicBool};
+use core::{
+    sync::atomic::{self, AtomicBool},
+    time::Duration,
+};
 use std::{
     io,
     net::TcpStream,
@@ -13,6 +16,7 @@ use std::{
 use crossterm::style::Stylize;
 use eyre::{bail, eyre, Context};
 use indexmap::IndexSet;
+use log::{debug, trace};
 use rustls::{pki_types::ServerName, ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use thiserror::Error;
 
@@ -126,7 +130,6 @@ pub fn start(
                     match connection.recv() {
                         Ok(messages) => {
                             for msg in messages {
-                                // debug!("recv msg {:#?}", msg);
                                 msg_sender.send(msg)?;
                             }
                         }
@@ -160,7 +163,7 @@ pub fn start(
 
                 let input = || -> Result<(), InputErr> {
                     let state = &mut *state.lock().unwrap();
-                    match state.ui.input() {
+                    let ret = match state.ui.input() {
                         InputStatus::Complete(input) => {
                             handle_input(state, &queue_sender, input.trim())
                         }
@@ -168,12 +171,20 @@ pub fn start(
                         InputStatus::Incomplete => Ok(()),
                         InputStatus::Quit => Err(InputErr::Quit),
                         InputStatus::IoErr(e) => Err(InputErr::Io(e)),
-                    }
+                    };
+                    ret
                 }();
 
                 match input {
                     // no input yet, just loop
-                    Ok(()) => {}
+                    Ok(()) => {
+                        // the delay between input polls. this needs to exist so that this code
+                        // isn't constanly locking and unlocking the state
+                        // mutex, which was causing other code to never get a
+                        // turn on the mutex.
+                        const INPUT_POLL_DELAY: Duration = Duration::from_millis(10);
+                        thread::sleep(INPUT_POLL_DELAY);
+                    }
                     Err(InputErr::Quit) => {
                         QUIT_REQUESTED.store(true, atomic::Ordering::Relaxed);
                         return;
