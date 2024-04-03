@@ -1,5 +1,5 @@
 use core::time::Duration;
-use std::{collections::VecDeque, fs::File, io, io::Write};
+use std::{collections::VecDeque, io};
 
 use crossterm::{
     event,
@@ -9,6 +9,7 @@ use crossterm::{
     terminal::{self, disable_raw_mode, enable_raw_mode, ClearType},
 };
 use eyre::bail;
+use log::{debug, error, info, warn};
 
 use crate::ui::{
     layout::Layout,
@@ -23,7 +24,6 @@ pub struct TerminalUi<'a> {
     /// the last `scrollback` messages of the history should be hidden (would be below the screen)
     scrollback: usize,
     input_buffer: String,
-    log_file: File,
 }
 
 impl<'a> TerminalUi<'a> {
@@ -33,14 +33,12 @@ impl<'a> TerminalUi<'a> {
         enable_raw_mode()?;
         execute!(terminal, terminal::Clear(ClearType::Purge))?;
 
-        let log_file = File::options().create(true).append(true).open("log.txt")?;
         let mut this = Self {
             terminal,
             layout,
             history: VecDeque::new(),
             scrollback: 0,
             input_buffer: String::new(),
-            log_file,
         };
         // force a re-render to move the cursor and add the input background
         let _ = this.render();
@@ -49,7 +47,7 @@ impl<'a> TerminalUi<'a> {
 
     pub fn writeln(&mut self, line: impl Into<Line<'a>>) -> eyre::Result<()> {
         let line = line.into();
-        // self.log_file.write_all(format!("{}\n", line).as_bytes())?;
+        info!("{}", line);
         self.history.push_back(line);
         // update the screen
         self.render()?;
@@ -58,8 +56,7 @@ impl<'a> TerminalUi<'a> {
 
     pub fn debug(&mut self, msg: impl Into<String>) -> eyre::Result<()> {
         let msg = msg.into();
-        self.log_file
-            .write_all(format!("DEBUG {}\n", msg).as_bytes())?;
+        debug!("{}", msg);
         self.history
             .push_back(Line::default().push(format!("DEBUG: {}", msg).dark_grey()));
         self.render()?;
@@ -68,8 +65,7 @@ impl<'a> TerminalUi<'a> {
 
     pub fn warn(&mut self, msg: impl Into<String>) -> eyre::Result<()> {
         let msg = msg.into();
-        self.log_file
-            .write_all(format!("WARN {}\n", msg).as_bytes())?;
+        warn!("{}", msg);
         self.history
             .push_back(Line::default().push(format!("WARN: {}", msg).yellow()));
 
@@ -79,7 +75,7 @@ impl<'a> TerminalUi<'a> {
 
     pub fn error(&mut self, msg: impl Into<String>) -> eyre::Result<()> {
         let msg = msg.into();
-        self.log_file.write_all(format!("{}\n", msg).as_bytes())?;
+        error!("{}", msg);
         self.history
             .push_back(Line::default().push(format!("ERROR: {}", msg).red()));
         self.render()?;
@@ -199,9 +195,6 @@ impl<'a> TerminalUi<'a> {
         let [main_rect, input_rect] = layout.as_slice() else {
             bail!("incorrect number of components in split layout");
         };
-        // self.log_file
-        //     .write_all(format!("main: {:#?}\ninput: {:#?}\n", main_rect,
-        // input_rect).as_bytes())?;
 
         const MAIN_TEXT_WRAP_MODE: WrapMode = WrapMode::WordWrap;
 
