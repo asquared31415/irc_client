@@ -3,7 +3,7 @@ use std::{collections::VecDeque, fs::File, io, io::Write};
 
 use crossterm::{
     event,
-    event::{Event, KeyCode, KeyEvent, KeyEventKind},
+    event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     execute,
     style::Stylize,
     terminal::{self, disable_raw_mode, enable_raw_mode, ClearType},
@@ -98,10 +98,39 @@ impl<'a> TerminalUi<'a> {
         let Ok(event) = event::read() else { todo!() };
 
         match event {
-            Event::Key(KeyEvent { code, kind, .. }) => {
+            Event::Key(KeyEvent {
+                code,
+                kind,
+                modifiers,
+                ..
+            }) => {
                 // only detecting key down
                 if kind != KeyEventKind::Press {
                     return InputStatus::Incomplete;
+                }
+
+                // KEYBINDS
+                if modifiers.contains(KeyModifiers::CONTROL) {
+                    if let KeyCode::Char(c) = code {
+                        match c {
+                            // these navigations are very emacs inspired
+                            'p' => {
+                                self.scrollback = usize::min(
+                                    self.scrollback.saturating_add(1),
+                                    self.history.len().saturating_sub(1),
+                                );
+                                self.render();
+                                return InputStatus::Incomplete;
+                            }
+                            'n' => {
+                                // this can never over-scroll because saturating caps at 0
+                                self.scrollback = self.scrollback.saturating_sub(1);
+                                self.render();
+                                return InputStatus::Incomplete;
+                            }
+                            _ => {}
+                        }
+                    }
                 }
 
                 match code {
