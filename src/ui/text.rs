@@ -2,7 +2,7 @@ use core::{
     fmt::{Debug, Display},
     num::NonZeroU16,
 };
-use std::{fs::File, io, io::prelude::Write as _};
+use std::io;
 
 use crossterm::{
     cursor, execute,
@@ -114,7 +114,7 @@ impl<'a> Line<'a> {
                             .unwrap()
                             .push(StyledContent::new(style, word.to_string()));
                         *remaining_width -= word.len() as u16;
-                    } else if word.len() > usize::from(width) {
+                    } else if word.len() >= usize::from(width) {
                         // this word will never fit on one line!
                         let (this_line, next) = word.split_at(usize::from(*remaining_width));
                         lines
@@ -248,15 +248,8 @@ pub fn draw_text<'a>(
     } = rect;
     execute!(writer, cursor::MoveTo(x, y))?;
 
-    let mut log_file = File::options()
-        .create(true)
-        .append(true)
-        .open("log_render.txt")?;
-    // log_file.write_all(format!("pos: {:?}\n", cursor::position()?).as_bytes())?;
-
     let lines = line.wrap(config.wrap, width);
     let line_count = lines.len() as u16;
-    log_file.write_all(format!("line: {:#?}\n", lines).as_bytes())?;
     match lines.as_slice() {
         [] => {}
         [start @ .., last] => {
