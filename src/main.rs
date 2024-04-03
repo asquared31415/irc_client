@@ -10,6 +10,7 @@ use std::{sync::mpsc::Sender, thread, time::SystemTime};
 
 use clap::Parser;
 use color_eyre::eyre::Result;
+use log::LevelFilter;
 
 use crate::{
     client::ExitReason,
@@ -56,6 +57,7 @@ fn main() -> Result<()> {
                 msg
             ))
         })
+        .level(LevelFilter::Debug)
         .chain(fern::log_file(LOG_PATH)?)
         .apply()?;
 

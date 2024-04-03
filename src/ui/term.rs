@@ -47,7 +47,7 @@ impl<'a> TerminalUi<'a> {
 
     pub fn writeln(&mut self, line: impl Into<Line<'a>>) -> eyre::Result<()> {
         let line = line.into();
-        info!("{}", line);
+        info!("{}", line.fmt_unstyled());
         self.history.push_back(line);
         // update the screen
         self.render()?;

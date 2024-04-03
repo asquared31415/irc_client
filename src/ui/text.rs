@@ -1,5 +1,5 @@
 use core::{
-    fmt::{Debug, Display},
+    fmt::{Debug, Display, Write as _},
     num::NonZeroU16,
 };
 use std::io;
@@ -8,6 +8,7 @@ use crossterm::{
     cursor, execute,
     style::{ContentStyle, StyledContent},
 };
+use log::trace;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::ui::layout::Rect;
@@ -72,6 +73,15 @@ impl<'a> Line<'a> {
         }
     }
 
+    pub fn fmt_unstyled(&self) -> String {
+        let mut out = String::new();
+        for span in self.content.iter() {
+            // writing to String can only fail on OoM, and that aborts
+            let _ = write!(&mut out, "{}", span.content);
+        }
+        out
+    }
+
     fn wrap(&self, wrap: WrapMode, width: u16) -> Vec<Vec<StyledContent<String>>> {
         // remove the style from the content by displaying the base content. this is then used to
         // determine what is a grapheme for the purposes of wrapping.
@@ -108,7 +118,14 @@ impl<'a> Line<'a> {
                     word: &str,
                     style: ContentStyle,
                 ) {
+                    trace!(
+                        "handling word {:?}, width {}, remaining {}",
+                        word,
+                        width,
+                        remaining_width
+                    );
                     if word.len() <= usize::from(*remaining_width) {
+                        trace!("word on same line");
                         lines
                             .last_mut()
                             .unwrap()
@@ -116,6 +133,7 @@ impl<'a> Line<'a> {
                         *remaining_width -= word.len() as u16;
                     } else if word.len() >= usize::from(width) {
                         // this word will never fit on one line!
+                        trace!("word would NEVER fit: {:?}/{}", word, width);
                         let (this_line, next) = word.split_at(usize::from(*remaining_width));
                         lines
                             .last_mut()
@@ -126,10 +144,11 @@ impl<'a> Line<'a> {
                         *remaining_width = width;
                         handle_word(lines, width, remaining_width, next, style);
                     } else {
+                        trace!("word on next line");
                         // if a word can't fit in the remaining space, but would be fine on the
                         // next line, wrap
                         lines.push(vec![StyledContent::new(style, word.to_string())]);
-                        *remaining_width = width;
+                        *remaining_width = width - (word.len() as u16);
                     }
                 }
 
