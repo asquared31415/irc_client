@@ -164,7 +164,7 @@ pub fn start(
                     let state = &mut *state.lock().unwrap();
                     let ret = match state.ui.input() {
                         InputStatus::Complete(input) => {
-                            handle_input(state, &queue_sender, input.trim())
+                            handle_input(state, &queue_sender, input.trim_start())
                         }
                         // incomplete input, loop again
                         InputStatus::Incomplete => Ok(()),
