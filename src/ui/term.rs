@@ -2,17 +2,17 @@ use core::time::Duration;
 use std::{collections::VecDeque, io};
 
 use crossterm::{
-    event,
+    cursor, event,
     event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     execute,
     style::Stylize,
     terminal::{self, disable_raw_mode, enable_raw_mode, ClearType},
 };
 use eyre::bail;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 
 use crate::ui::{
-    layout::Layout,
+    layout::{Layout, Rect},
     text,
     text::{DrawTextConfig, Line, WrapMode},
 };
@@ -245,8 +245,19 @@ impl<'a> TerminalUi<'a> {
             draw_rect.height -= used;
         }
 
-        let needed_buffer = input_rect.width as isize - self.input_buffer.len() as isize;
-        let input_text = if needed_buffer > 0 {
+        self.draw_input(input_rect)?;
+
+        Ok(())
+    }
+
+    fn draw_input(&mut self, input_rect: &Rect) -> eyre::Result<()> {
+        // leave space on the right hand side for clarity and to place the cursor without it
+        // overlapping a character
+        const INPUT_BUFFER_PAD: u16 = 1;
+
+        let input_width = input_rect.width.saturating_sub(INPUT_BUFFER_PAD) as isize;
+        let needed_buffer = input_width - (self.input_buffer.len() as isize);
+        let mut input_text = if needed_buffer > 0 {
             let mut text = self.input_buffer.clone();
             text.push_str(" ".repeat(needed_buffer as usize).as_str());
             text
@@ -255,6 +266,7 @@ impl<'a> TerminalUi<'a> {
         } else {
             self.input_buffer[needed_buffer.abs() as usize..].to_string()
         };
+        input_text.push_str(" ".repeat(usize::from(INPUT_BUFFER_PAD)).as_str());
 
         text::draw_text(
             &mut self.terminal,
@@ -265,6 +277,11 @@ impl<'a> TerminalUi<'a> {
                 wrap: WrapMode::Truncate,
             },
         )?;
+
+        let cursor_pos = usize::clamp(self.input_buffer.len(), 0, usize::from(input_rect.width));
+        trace!("input cursor pos {}", cursor_pos);
+
+        execute!(self.terminal, cursor::MoveToColumn(cursor_pos as u16))?;
 
         Ok(())
     }
