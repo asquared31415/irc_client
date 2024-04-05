@@ -512,9 +512,9 @@ fn handle_input(
 
 fn create_nick_line(nick: &str, me: bool) -> Line<'static> {
     let nick = if me {
-        nick.to_string().magenta()
-    } else {
         nick.to_string().magenta().bold()
+    } else {
+        nick.to_string().magenta()
     };
     Line::default()
         .push_unstyled("<")
