@@ -3,6 +3,7 @@ use core::{
     time::Duration,
 };
 use std::{
+    collections::HashMap,
     io,
     net::TcpStream,
     sync::{
@@ -291,6 +292,9 @@ fn on_msg(
             state.conn_state = ConnectionState::Connected(ConnectedState {
                 nick: nick.to_string(),
                 channels: IndexSet::new(),
+                messages_state: MessagesState {
+                    active_names: HashMap::new(),
+                },
             });
             ui.writeln(msg.to_string())?;
         }
@@ -336,7 +340,7 @@ fn on_msg(
         // =====================
         Message::Join(join_channels) => {
             let ClientState {
-                conn_state: ConnectionState::Connected(ConnectedState { nick, channels }),
+                conn_state: ConnectionState::Connected(ConnectedState { nick, channels, .. }),
                 ..
             } = state
             else {
@@ -412,7 +416,7 @@ fn on_msg(
         // OTHER NUMERIC REPLIES
         // =====================
         msg @ Message::Numeric { .. } => {
-            handlers::numeric::handle(msg, ui)?;
+            handlers::numeric::handle(msg, state)?;
         }
 
         // =====================
@@ -458,7 +462,7 @@ fn handle_input(
             Ok(())
         }
         ClientState {
-            conn_state: ConnectionState::Connected(ConnectedState { nick, channels }),
+            conn_state: ConnectionState::Connected(ConnectedState { nick, channels, .. }),
             ..
         } => {
             if let Some((_, input)) = input.split_prefix('/') {
@@ -536,4 +540,17 @@ pub struct ConnectedState {
     pub nick: String,
     // list of connected channel names. each name includes the prefix.
     pub channels: IndexSet<String>,
+    pub messages_state: MessagesState,
+}
+
+/// state for messages that are in-flight or handled across multiple messages
+#[derive(Debug)]
+pub struct MessagesState {
+    // a list of channels with active NAMES replies
+    pub active_names: HashMap<String, NamesState>,
+}
+
+#[derive(Debug)]
+pub struct NamesState {
+    pub names: Vec<String>,
 }

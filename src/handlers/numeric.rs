@@ -1,13 +1,23 @@
 use crossterm::style::Stylize;
+use eyre::bail;
 
 use crate::{
+    client::{ClientState, ConnectedState, ConnectionState, NamesState},
     irc_message::Message,
-    ui::{term::TerminalUi, text::Line},
+    ui::text::Line,
 };
 
-pub fn handle(msg: Message, ui: &mut TerminalUi) -> eyre::Result<()> {
+pub fn handle(msg: Message, state: &mut ClientState) -> eyre::Result<()> {
     let Message::Numeric { num, args } = msg else {
         unreachable!()
+    };
+
+    let ClientState {
+        ui,
+        conn_state: ConnectionState::Connected(ConnectedState { messages_state, .. }),
+    } = state
+    else {
+        bail!("cannot handle messages when not yet connected");
     };
 
     use crate::constants::numerics::*;
@@ -94,6 +104,60 @@ pub fn handle(msg: Message, ui: &mut TerminalUi) -> eyre::Result<()> {
                     .yellow(),
                 ),
             )?;
+        }
+
+        RPL_MOTDSTART | RPL_MOTD | RPL_ENDOFMOTD => {
+            // display the MOTD to the user
+            if let Some(msg) = args.last().and_then(|p| p.as_str()) {
+                ui.writeln(msg.to_string())?;
+            }
+        }
+
+        // =======================
+        // names
+        // =======================
+        RPL_NAMREPLY => {
+            let [_, _, channel, names_list @ ..] = args.as_slice() else {
+                ui.warn(format!("RPL_NAMREPLY missing params"))?;
+                return Ok(());
+            };
+            let Some(channel) = channel.as_str() else {
+                ui.warn("RPL_NAMEREPLY malformed args")?;
+                return Ok(());
+            };
+
+            let NamesState { names } = messages_state
+                .active_names
+                .entry(channel.to_string())
+                .or_insert_with(|| NamesState { names: Vec::new() });
+            names.extend(
+                names_list
+                    .into_iter()
+                    .filter_map(|p| p.as_str().map(str::to_string)),
+            );
+        }
+        RPL_ENDOFNAMES => {
+            let [_, channel, ..] = args.as_slice() else {
+                ui.warn("RPL_ENDOFNAMES missing args")?;
+                return Ok(());
+            };
+            let Some(channel) = channel.as_str() else {
+                ui.warn("RPL_ENDOFNAMES malformed args")?;
+                return Ok(());
+            };
+
+            let Some(NamesState { names }) = messages_state.active_names.remove(channel) else {
+                ui.warn(format!("unexpected RPL_NAMEREPLY for {}", channel))?;
+                return Ok(());
+            };
+
+            ui.writeln(
+                Line::default()
+                    .push("NAMES".green())
+                    .push_unstyled(" for ")
+                    .push(channel.blue()),
+            )?;
+            ui.writeln(format!(" - {}", names.join(" ")))?;
         }
 
         // =======================
