@@ -460,7 +460,7 @@ fn handle_input(
     input: &str,
 ) -> Result<(), InputErr> {
     let ui = &mut state.ui;
-    ui.debug(format!("input: {}", input))?;
+    // ui.debug(format!("input: {}", input))?;
     match state {
         ClientState {
             conn_state: ConnectionState::Registration(..),
