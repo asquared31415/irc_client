@@ -26,6 +26,7 @@ use crate::{
     handlers,
     irc_message::{IRCMessage, Message, Param, Source},
     server_io::ServerIo,
+    state::{ClientState, ConnectedState, ConnectionState, MessagesState, RegistrationState},
     ui::{
         layout::{Direction, Layout, Section, SectionKind},
         term::{InputStatus, TerminalUi},
@@ -515,42 +516,4 @@ fn write_msg<'a>(
     composed.extend(line.into_iter());
     ui.writeln(composed)?;
     Ok(())
-}
-
-pub struct ClientState<'a> {
-    pub ui: TerminalUi<'a>,
-    pub conn_state: ConnectionState,
-}
-
-#[derive(Debug)]
-pub enum ConnectionState {
-    Registration(RegistrationState),
-    Connected(ConnectedState),
-}
-
-#[derive(Debug)]
-pub struct RegistrationState {
-    /// the nick that the user requested. the server will respond with the actual nick in the
-    /// RPL_WELCOME message.
-    pub requested_nick: String,
-}
-
-#[derive(Debug)]
-pub struct ConnectedState {
-    pub nick: String,
-    // list of connected channel names. each name includes the prefix.
-    pub channels: IndexSet<String>,
-    pub messages_state: MessagesState,
-}
-
-/// state for messages that are in-flight or handled across multiple messages
-#[derive(Debug)]
-pub struct MessagesState {
-    // a list of channels with active NAMES replies
-    pub active_names: HashMap<String, NamesState>,
-}
-
-#[derive(Debug)]
-pub struct NamesState {
-    pub names: Vec<String>,
 }

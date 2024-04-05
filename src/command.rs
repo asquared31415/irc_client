@@ -5,8 +5,8 @@ use eyre::bail;
 use thiserror::Error;
 
 use crate::{
-    client::{ClientState, ConnectionState},
     irc_message::{IRCMessage, Message},
+    state::{ClientState, ConnectionState},
 };
 
 #[derive(Debug)]

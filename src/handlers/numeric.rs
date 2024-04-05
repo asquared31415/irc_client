@@ -2,8 +2,8 @@ use crossterm::style::Stylize;
 use eyre::bail;
 
 use crate::{
-    client::{ClientState, ConnectedState, ConnectionState, NamesState},
     irc_message::Message,
+    state::{ClientState, ConnectedState, ConnectionState, NamesState},
     ui::text::Line,
 };
 

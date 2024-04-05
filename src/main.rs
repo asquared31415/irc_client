@@ -26,6 +26,7 @@ mod handlers;
 mod irc_message;
 mod logging;
 mod server_io;
+mod state;
 mod ui;
 
 #[derive(Debug, Parser)]
