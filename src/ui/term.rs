@@ -12,6 +12,7 @@ use eyre::bail;
 use log::{debug, error, info, trace, warn};
 
 use crate::ui::{
+    input_buffer::InputBuffer,
     layout::{Layout, Rect},
     text,
     text::{DrawTextConfig, Line, WrapMode},
@@ -23,7 +24,15 @@ pub struct TerminalUi<'a> {
     history: VecDeque<Line<'a>>,
     /// the last `scrollback` messages of the history should be hidden (would be below the screen)
     scrollback: usize,
-    input_buffer: String,
+    input_buffer: InputBuffer,
+}
+
+#[derive(Debug)]
+pub enum InputStatus {
+    Complete(String),
+    Incomplete,
+    Quit,
+    IoErr(io::Error),
 }
 
 impl<'a> TerminalUi<'a> {
@@ -38,7 +47,7 @@ impl<'a> TerminalUi<'a> {
             layout,
             history: VecDeque::new(),
             scrollback: 0,
-            input_buffer: String::new(),
+            input_buffer: InputBuffer::default(),
         };
         // force a re-render to move the cursor and add the input background
         let _ = this.render();
@@ -108,7 +117,7 @@ impl<'a> TerminalUi<'a> {
                 // KEYBINDS
                 if modifiers.contains(KeyModifiers::CONTROL) {
                     if let KeyCode::Char(c) = code {
-                        match c {
+                        let status = match c {
                             // these navigations are very emacs inspired
                             'p' => {
                                 self.scrollback = usize::min(
@@ -116,36 +125,58 @@ impl<'a> TerminalUi<'a> {
                                     self.history.len().saturating_sub(1),
                                 );
                                 self.render();
-                                return InputStatus::Incomplete;
+                                InputStatus::Incomplete
                             }
                             'n' => {
                                 // this can never over-scroll because saturating caps at 0
                                 self.scrollback = self.scrollback.saturating_sub(1);
                                 self.render();
-                                return InputStatus::Incomplete;
+                                InputStatus::Incomplete
                             }
-                            _ => {}
-                        }
+                            'f' => {
+                                self.input_buffer.offset(1);
+                                self.render();
+                                InputStatus::Incomplete
+                            }
+                            'b' => {
+                                self.input_buffer.offset(-1);
+                                self.render();
+                                InputStatus::Incomplete
+                            }
+                            'a' => {
+                                self.input_buffer.select(0);
+                                self.render();
+                                InputStatus::Incomplete
+                            }
+                            'e' => {
+                                self.input_buffer.select(self.input_buffer.buffer().len());
+                                self.render();
+                                InputStatus::Incomplete
+                            }
+                            'd' => {
+                                self.input_buffer.delete();
+                                self.render();
+                                InputStatus::Incomplete
+                            }
+                            _ => InputStatus::Incomplete,
+                        };
+                        return status;
                     }
                 }
 
                 match code {
-                    KeyCode::Enter => {
-                        let input = self.input_buffer.clone();
-                        self.input_buffer.clear();
-                        return InputStatus::Complete(input);
-                    }
-                    KeyCode::Esc => return InputStatus::Quit,
+                    KeyCode::Enter => InputStatus::Complete(self.input_buffer.finish()),
+                    KeyCode::Esc => InputStatus::Quit,
                     KeyCode::Modifier(_) => todo!(),
                     KeyCode::Char(c) => {
-                        self.input_buffer.push(c);
+                        self.input_buffer.insert(c);
                         self.render();
-                        return InputStatus::Incomplete;
+                        InputStatus::Incomplete
                     }
                     KeyCode::Backspace => {
-                        self.input_buffer.pop();
+                        self.input_buffer.backspace();
                         self.render();
-                        return InputStatus::Incomplete;
+                        InputStatus::Incomplete
                     }
 
                     KeyCode::Right
@@ -169,9 +200,7 @@ impl<'a> TerminalUi<'a> {
                     | KeyCode::Pause
                     | KeyCode::Menu
                     | KeyCode::KeypadBegin
-                    | KeyCode::Media(_) => {
-                        return InputStatus::Incomplete;
-                    }
+                    | KeyCode::Media(_) => InputStatus::Incomplete,
                 }
             }
             Event::Resize(_, _) => {
@@ -255,18 +284,17 @@ impl<'a> TerminalUi<'a> {
         // overlapping a character
         const INPUT_BUFFER_PAD: u16 = 1;
 
-        let input_width = input_rect.width.saturating_sub(INPUT_BUFFER_PAD) as isize;
-        let needed_buffer = input_width - (self.input_buffer.len() as isize);
-        let mut input_text = if needed_buffer > 0 {
-            let mut text = self.input_buffer.clone();
-            text.push_str(" ".repeat(needed_buffer as usize).as_str());
-            text
-        } else if needed_buffer == 0 {
-            self.input_buffer.clone()
-        } else {
-            self.input_buffer[needed_buffer.abs() as usize..].to_string()
-        };
-        input_text.push_str(" ".repeat(usize::from(INPUT_BUFFER_PAD)).as_str());
+        let input_width = input_rect.width.saturating_sub(INPUT_BUFFER_PAD);
+        let (input_text, cursor_col) = self.input_buffer.get_visible_area(input_width);
+        trace!("input_text {:?}, cursor_col {}", input_text, cursor_col);
+        let mut input_text = input_text.to_string();
+
+        // re-pad with spaces
+        let needed_pad = usize::from(input_rect.width).saturating_sub(input_text.len());
+        if needed_pad > 0 {
+            trace!("padding with {} spaces", needed_pad);
+            input_text.push_str(" ".repeat(needed_pad).as_str());
+        }
 
         text::draw_text(
             &mut self.terminal,
@@ -278,19 +306,8 @@ impl<'a> TerminalUi<'a> {
             },
         )?;
 
-        let cursor_pos = usize::clamp(self.input_buffer.len(), 0, usize::from(input_rect.width));
-        trace!("input cursor pos {}", cursor_pos);
-
-        execute!(self.terminal, cursor::MoveToColumn(cursor_pos as u16))?;
+        execute!(self.terminal, cursor::MoveToColumn(cursor_col as u16))?;
 
         Ok(())
     }
-}
-
-#[derive(Debug)]
-pub enum InputStatus {
-    Complete(String),
-    Incomplete,
-    Quit,
-    IoErr(io::Error),
 }
