@@ -395,22 +395,29 @@ fn on_msg(
         // =====================
         Message::Privmsg { msg: privmsg, .. } => {
             // TODO: check whether target is channel vs user
-            write_msg(
-                ui,
-                msg.source.as_ref(),
-                Line::new_without_style(privmsg).unwrap(),
-            )?;
+            let mut line = if let Some(source) = msg.source.as_ref() {
+                create_nick_line(source.get_name(), false)
+            } else {
+                Line::default()
+            };
+            line.extend(Line::default().push_unstyled(privmsg).into_iter());
+            ui.writeln(line)?;
         }
         Message::Notice {
             msg: notice_msg, ..
         } => {
-            write_msg(
-                ui,
-                msg.source.as_ref(),
+            let mut line = if let Some(source) = msg.source.as_ref() {
+                create_nick_line(source.get_name(), false)
+            } else {
+                Line::default()
+            };
+            line.extend(
                 Line::default()
                     .push("NOTICE ".green())
-                    .push_unstyled(notice_msg),
-            )?;
+                    .push_unstyled(notice_msg)
+                    .into_iter(),
+            );
+            ui.writeln(line)?;
         }
 
         // =====================
@@ -488,10 +495,12 @@ fn handle_input(
                             },
                         })
                         .wrap_err("failed to send privmsg to writer thread")?;
-                    write_msg(
-                        ui,
-                        Some(&Source::new(nick.to_string())),
-                        Line::default().push_unstyled(input),
+                    ui.writeln(
+                        Line::default()
+                            .push_unstyled("<")
+                            .push(nick.to_string().magenta().bold())
+                            .push_unstyled(">")
+                            .push_unstyled(input),
                     )?;
                 }
 
@@ -501,19 +510,14 @@ fn handle_input(
     }
 }
 
-fn write_msg<'a>(
-    ui: &mut TerminalUi<'a>,
-    source: Option<&Source>,
-    line: Line<'a>,
-) -> eyre::Result<()> {
-    let mut composed = Line::default();
-    if let Some(source) = source {
-        composed = composed
-            .push_unstyled("<")
-            .push(source.to_string().magenta())
-            .push_unstyled(">");
-    }
-    composed.extend(line.into_iter());
-    ui.writeln(composed)?;
-    Ok(())
+fn create_nick_line(nick: &str, me: bool) -> Line<'static> {
+    let nick = if me {
+        nick.to_string().magenta()
+    } else {
+        nick.to_string().magenta().bold()
+    };
+    Line::default()
+        .push_unstyled("<")
+        .push(nick)
+        .push_unstyled(">")
 }
