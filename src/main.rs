@@ -6,10 +6,10 @@
     thread_id_value
 )]
 
-use std::{sync::mpsc::Sender, thread, time::SystemTime};
+use std::sync::mpsc::Sender;
 
 use clap::Parser;
-use color_eyre::eyre::Result;
+use eyre::{bail, eyre};
 use log::LevelFilter;
 
 use crate::{
@@ -24,6 +24,7 @@ mod constants;
 mod ext;
 mod handlers;
 mod irc_message;
+mod logging;
 mod server_io;
 mod ui;
 
@@ -43,23 +44,8 @@ struct Cli {
     twitch_token: Option<String>,
 }
 
-const LOG_PATH: &str = "irc_log.txt";
-
-fn main() -> Result<()> {
+fn main() -> eyre::Result<()> {
     color_eyre::install()?;
-    fern::Dispatch::new()
-        .format(|out, msg, record| {
-            out.finish(format_args!(
-                "[{}] [{:<5}] [{:016X}] {}",
-                humantime::format_rfc3339_millis(SystemTime::now()),
-                record.level(),
-                thread::current().id().as_u64(),
-                msg
-            ))
-        })
-        .level(LevelFilter::Debug)
-        .chain(fern::log_file(LOG_PATH)?)
-        .apply()?;
 
     if option_env!("RECT_DBG").is_some() {
         let layout = Layout {
@@ -94,6 +80,12 @@ fn main() -> Result<()> {
         nick,
         twitch_token,
     } = Cli::parse();
+
+    let Some((name, _)) = addr.split_once(':') else {
+        bail!("unable to parse hostname");
+    };
+
+    logging::init(name, LevelFilter::Debug).map_err(|_| eyre!("failed to init logger"))?;
 
     //code to run upon starting.
     let client_on_start = |sender: &Sender<IRCMessage>| {
