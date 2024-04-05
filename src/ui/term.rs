@@ -166,8 +166,6 @@ impl<'a> TerminalUi<'a> {
 
                 match code {
                     KeyCode::Enter => InputStatus::Complete(self.input_buffer.finish()),
-                    KeyCode::Esc => InputStatus::Quit,
-                    KeyCode::Modifier(_) => todo!(),
                     KeyCode::Char(c) => {
                         self.input_buffer.insert(c);
                         self.render();
@@ -175,6 +173,11 @@ impl<'a> TerminalUi<'a> {
                     }
                     KeyCode::Backspace => {
                         self.input_buffer.backspace();
+                        self.render();
+                        InputStatus::Incomplete
+                    }
+                    KeyCode::Delete => {
+                        self.input_buffer.delete();
                         self.render();
                         InputStatus::Incomplete
                     }
@@ -189,7 +192,6 @@ impl<'a> TerminalUi<'a> {
                     | KeyCode::PageDown
                     | KeyCode::Tab
                     | KeyCode::BackTab
-                    | KeyCode::Delete
                     | KeyCode::Insert
                     | KeyCode::F(_)
                     | KeyCode::Null
@@ -200,7 +202,9 @@ impl<'a> TerminalUi<'a> {
                     | KeyCode::Pause
                     | KeyCode::Menu
                     | KeyCode::KeypadBegin
-                    | KeyCode::Media(_) => InputStatus::Incomplete,
+                    | KeyCode::Media(_)
+                    | KeyCode::Esc
+                    | KeyCode::Modifier(_) => InputStatus::Incomplete,
                 }
             }
             Event::Resize(_, _) => {
