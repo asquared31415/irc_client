@@ -1,6 +1,6 @@
 // FIXME: none of this can handle UTF8 input properly!
 
-use log::{debug, trace};
+use log::trace;
 
 #[derive(Debug, Clone, Default)]
 pub struct InputBuffer {
@@ -65,7 +65,7 @@ impl InputBuffer {
 
     pub fn get_visible_area(&self, width: u16) -> (&str, usize) {
         // try to place the cursor as close to the middle of the returned string as possible.
-        // if the cursor is at least ceil(width/2) characters from either end of the string, it will
+        // if the cursor is at least width/2 characters from either end of the string, it will
         // be exactly in the middle.
         //
         // CASES:
@@ -80,26 +80,44 @@ impl InputBuffer {
         //           |             ^   |
         trace!("buffer {:?}", self.buffer);
 
-        let half_width = usize::from(width.div_ceil(2));
-        let left_dist = usize::min(self.cursor_idx, half_width);
+        let width = usize::from(width);
+
+        let half_width = width / 2;
+        // the distance to the left side of the buffer (not window)
+        let left_dist = self.cursor_idx;
+        // the distance to the right side of the buffer (not window)
+        let right_dist = self.buffer.len().saturating_sub(self.cursor_idx);
+
         trace!(
-            "width {}(half {}) cursor {} left_dist {}",
+            "width {}(half {}) cursor {} left_dist {} right_dist {}",
             width,
             half_width,
             self.cursor_idx,
-            left_dist
+            left_dist,
+            right_dist
         );
 
-        // can never overflow, `min` above ensures that lift_dist is never greater than the idx
-        let start = self.cursor_idx - left_dist;
-        let end = usize::min(start + usize::from(width), self.buffer.len());
-        trace!("start {} end {}", start, end);
+        let range = if left_dist >= half_width && right_dist <= half_width {
+            // if the cursor is close to the end of the text, stop moving the text
+            // leftwards, and move the cursor right instead
+            let start = self.buffer.len().saturating_sub(width);
+            start..self.buffer.len()
+        } else {
+            // the text extends half_width characters to the left, or to the start of the text,
+            // whichever is less (as to not overflow in the negative direction)
+            let start = self.cursor_idx - usize::min(left_dist, half_width);
+            let end = usize::min(start + width, self.buffer.len());
+            start..end
+        };
+        let cursor_pos = self.cursor_idx - range.start;
+
+        trace!("range {:?}", range);
 
         (
             self.buffer
-                .get(start..end)
+                .get(range.clone())
                 .expect("start and end should be clamped"),
-            left_dist,
+            cursor_pos,
         )
     }
 }
