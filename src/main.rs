@@ -3,7 +3,8 @@
     never_type_fallback,
     let_chains,
     lazy_cell,
-    thread_id_value
+    thread_id_value,
+    utf8_chunks
 )]
 
 use std::sync::mpsc::Sender;
