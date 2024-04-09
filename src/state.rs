@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use indexmap::IndexSet;
 
-use crate::ui::term::TerminalUi;
+use crate::{channel::channel::Channel, ui::term::TerminalUi};
 
 pub struct ClientState<'a> {
     pub ui: TerminalUi<'a>,
@@ -25,8 +25,8 @@ pub struct RegistrationState {
 #[derive(Debug)]
 pub struct ConnectedState {
     pub nick: String,
-    // list of connected channel names. each name includes the prefix.
-    pub channels: IndexSet<String>,
+    // currently connected channels
+    pub channels: Vec<Channel>,
     pub messages_state: MessagesState,
 }
 

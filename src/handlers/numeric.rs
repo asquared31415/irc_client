@@ -1,5 +1,6 @@
 use crossterm::style::Stylize;
 use eyre::bail;
+use log::debug;
 
 use crate::{
     irc_message::Message,
@@ -14,7 +15,12 @@ pub fn handle(msg: Message, state: &mut ClientState) -> eyre::Result<()> {
 
     let ClientState {
         ui,
-        conn_state: ConnectionState::Connected(ConnectedState { messages_state, .. }),
+        conn_state:
+            ConnectionState::Connected(ConnectedState {
+                channels,
+                messages_state,
+                ..
+            }),
     } = state
     else {
         bail!("cannot handle messages when not yet connected");
@@ -141,21 +147,33 @@ pub fn handle(msg: Message, state: &mut ClientState) -> eyre::Result<()> {
                 ui.warn("RPL_ENDOFNAMES missing args")?;
                 return Ok(());
             };
-            let Some(channel) = channel.as_str() else {
+            let Some(channel_name) = channel.as_str() else {
                 ui.warn("RPL_ENDOFNAMES malformed args")?;
                 return Ok(());
             };
 
-            let Some(NamesState { names }) = messages_state.active_names.remove(channel) else {
-                ui.warn(format!("unexpected RPL_NAMEREPLY for {}", channel))?;
+            let Some(NamesState { names }) = messages_state.active_names.remove(channel_name)
+            else {
+                ui.warn(format!("unexpected RPL_NAMEREPLY for {}", channel_name))?;
                 return Ok(());
             };
+
+            let Some(channel) = channels.iter_mut().find(|c| c.name() == channel_name) else {
+                ui.warn(format!(
+                    "cannot update names for channel not joined: {}",
+                    channel_name
+                ))?;
+                return Ok(());
+            };
+
+            channel.users.extend(names.iter().cloned());
+            debug!("{:#?}", channel);
 
             ui.writeln(
                 Line::default()
                     .push("NAMES".green())
                     .push_unstyled(" for ")
-                    .push(channel.blue()),
+                    .push(channel_name.blue()),
             )?;
             ui.writeln(format!(" - {}", names.join(" ")))?;
         }

@@ -16,11 +16,12 @@ use std::{
 
 use crossterm::style::Stylize;
 use eyre::{bail, eyre, Context};
-use indexmap::IndexSet;
+use log::debug;
 use rustls::{pki_types::ServerName, ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use thiserror::Error;
 
 use crate::{
+    channel::channel::Channel,
     command::Command,
     ext::*,
     handlers,
@@ -32,6 +33,7 @@ use crate::{
         term::{InputStatus, TerminalUi},
         text::Line,
     },
+    util::TargetKind,
 };
 
 #[derive(Debug, Error)]
@@ -292,7 +294,7 @@ fn on_msg(
 
             state.conn_state = ConnectionState::Connected(ConnectedState {
                 nick: nick.to_string(),
-                channels: IndexSet::new(),
+                channels: Vec::new(),
                 messages_state: MessagesState {
                     active_names: HashMap::new(),
                 },
@@ -347,31 +349,31 @@ fn on_msg(
             else {
                 bail!("JOIN messages can only be processed when connected to a server");
             };
-            let join_channels = join_channels
-                .into_iter()
-                .map(|(channel, _)| channel)
-                .collect::<Vec<_>>();
+            // let join_channels = join_channels
+            //     .into_iter()
+            //     .map(|(channel, _)| channel)
+            //     .collect::<Vec<_>>();
 
             // if the source of the join is ourself, update the list of joined channels,
             // otherwise announce a join
             match msg.source.as_ref().map(|source| source.get_name()) {
                 Some(source) if source == nick => {
-                    for chan in join_channels.iter() {
+                    for (channel, _) in join_channels.iter() {
                         ui.writeln(
                             Line::default()
                                 .push("joined ".green())
-                                .push(chan.clone().dark_blue()),
+                                .push(channel.clone().dark_blue()),
                         )?;
+                        channels.push(Channel::new(channel)?);
                     }
-                    channels.extend(join_channels);
                 }
                 Some(other) => {
-                    for chan in join_channels.iter() {
+                    for (channel, _) in join_channels.iter() {
                         ui.writeln(
                             Line::default()
                                 .push(other.magenta())
                                 .push(" joined ".green())
-                                .push(chan.clone().dark_blue()),
+                                .push(channel.clone().dark_blue()),
                         )?;
                     }
                 }
@@ -379,6 +381,8 @@ fn on_msg(
                     ui.warn("JOIN msg without a source")?;
                 }
             }
+
+            debug!("{:#?}", channels);
         }
 
         Message::Quit(reason) => {
@@ -388,6 +392,45 @@ fn on_msg(
             // NOTE: servers SHOULD always send a reason, but make sure
             let reason = reason.unwrap_or(String::from("disconnected"));
             ui.writeln(format!("{} quit: {}", name, reason))?;
+        }
+
+        // =====================
+        // modes
+        // =====================
+        Message::Mode { target, mode } => {
+            let Some(mode) = mode else {
+                ui.warn(format!("server sent MODE for {} without modestr", target))?;
+                return Ok(());
+            };
+
+            let ClientState {
+                conn_state: ConnectionState::Connected(ConnectedState { channels, .. }),
+                ..
+            } = state
+            else {
+                ui.warn("must be connected to handle MODE")?;
+                return Ok(());
+            };
+
+            match TargetKind::new(target) {
+                TargetKind::Channel(channel) => {
+                    let Some(channel) = channels.iter_mut().find(|c| c.name() == channel) else {
+                        ui.warn(format!(
+                            "unexpected MODE for not joined channel {}",
+                            channel
+                        ))?;
+                        return Ok(());
+                    };
+
+                    channel.modes = mode;
+                }
+                TargetKind::Nickname(_) => {}
+                TargetKind::Unknown(_) => {
+                    ui.warn("could not determine target for MODE")?;
+                }
+            }
+
+            debug!("{:#?}", channels);
         }
 
         // =====================
@@ -490,7 +533,7 @@ fn handle_input(
                             tags: None,
                             source: None,
                             message: Message::Privmsg {
-                                targets: channels.as_slice().iter().cloned().collect(),
+                                targets: channels.iter().map(|c| c.name().to_string()).collect(),
                                 msg: input.to_string(),
                             },
                         })

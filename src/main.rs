@@ -19,6 +19,7 @@ use crate::{
     ui::layout::{Direction, Layout, Section, SectionKind},
 };
 
+mod channel;
 mod client;
 mod command;
 mod constants;
@@ -29,6 +30,7 @@ mod logging;
 mod server_io;
 mod state;
 mod ui;
+mod util;
 
 #[derive(Debug, Parser)]
 #[command(version)]
