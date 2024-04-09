@@ -16,7 +16,6 @@ use log::LevelFilter;
 use crate::{
     client::ExitReason,
     irc_message::{IRCMessage, Message},
-    ui::layout::{Direction, Layout, Section, SectionKind},
 };
 
 mod channel;
@@ -50,33 +49,6 @@ struct Cli {
 
 fn main() -> eyre::Result<()> {
     color_eyre::install()?;
-
-    if option_env!("RECT_DBG").is_some() {
-        let layout = Layout {
-            direction: Direction::Vertical,
-            sections: vec![
-                Section::Leaf {
-                    kind: SectionKind::Exact(1),
-                },
-                Section::Node {
-                    direction: Direction::Horizontal,
-                    kind: SectionKind::Fill(1),
-                    sub_sections: vec![
-                        Section::Leaf {
-                            kind: SectionKind::Fill(2),
-                        },
-                        Section::Leaf {
-                            kind: SectionKind::Fill(1),
-                        },
-                    ],
-                },
-            ],
-        };
-
-        let rects = layout.calc((80, 20));
-        dbg!(&rects);
-        return Ok(());
-    }
 
     let Cli {
         addr,
