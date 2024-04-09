@@ -3,7 +3,6 @@ use core::{
     time::Duration,
 };
 use std::{
-    collections::HashMap,
     io,
     net::TcpStream,
     sync::{
@@ -16,24 +15,20 @@ use std::{
 
 use crossterm::style::Stylize;
 use eyre::{bail, eyre, Context};
-use log::debug;
 use rustls::{pki_types::ServerName, ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use thiserror::Error;
 
 use crate::{
-    channel::channel::Channel,
     command::Command,
     ext::*,
-    handlers,
-    irc_message::{IRCMessage, Message, Param, Source},
+    irc_message::{IRCMessage, Message},
     server_io::ServerIo,
-    state::{ClientState, ConnectedState, ConnectionState, MessagesState, RegistrationState},
+    state::{ClientState, ConnectedState, ConnectionState},
     ui::{
         layout::{Direction, Layout, Section, SectionKind},
-        term::{InputStatus, TerminalUi},
+        term::{InputStatus, TerminalUi, UiMsg},
         text::Line,
     },
-    util::TargetKind,
 };
 
 #[derive(Debug, Error)]
@@ -81,6 +76,13 @@ pub fn start(
         Box::new(stream)
     };
 
+    // send to this channel to have a message written to the server
+    let (write_sender, write_receiver) = mpsc::channel::<IRCMessage>();
+    // recv from this channel to get incoming messages from the server
+    let (msg_sender, msg_receiver) = mpsc::channel::<IRCMessage>();
+
+    let (ui_sender, ui_receiver) = mpsc::channel::<UiMsg>();
+
     let layout = Layout {
         direction: Direction::Vertical,
         sections: vec![
@@ -92,17 +94,12 @@ pub fn start(
             },
         ],
     };
-    let state = Arc::new(Mutex::new(ClientState {
-        ui: TerminalUi::new(layout, io::stdout())?,
-        conn_state: ConnectionState::Registration(RegistrationState {
-            requested_nick: nick.to_string(),
-        }),
-    }));
-
-    // send to this channel to have a message written to the server
-    let (write_sender, write_receiver) = mpsc::channel::<IRCMessage>();
-    // recv from this channel to get incoming messages from the server
-    let (msg_sender, msg_receiver) = mpsc::channel::<IRCMessage>();
+    let state = Arc::new(Mutex::new(ClientState::new(
+        write_sender.clone(),
+        ui_sender.clone(),
+        TerminalUi::new(layout, io::stdout())?,
+        nick.to_string(),
+    )));
 
     // stream reader and writer thread
     // moves the stream into the thread
@@ -168,11 +165,19 @@ pub fn start(
                     let state = &mut *state.lock().unwrap();
                     let ret = match state.ui.input() {
                         InputStatus::Complete(input) => {
-                            handle_input(state, &queue_sender, input.trim_start())
+                            // on complete, need to re-render to clear msg
+                            ui_sender.send(UiMsg::ReRender);
+                            handle_input(state, &queue_sender, &ui_sender, input.trim_start())
                         }
                         // incomplete input, loop again
-                        InputStatus::Incomplete => Ok(()),
-                        InputStatus::Quit => Err(InputErr::Quit),
+                        InputStatus::Incomplete { rerender } => {
+                            // some incomplete messages affect the cursor or input buffer state,
+                            // re-render for those
+                            if rerender {
+                                ui_sender.send(UiMsg::ReRender);
+                            }
+                            Ok(())
+                        }
                         InputStatus::IoErr(e) => Err(InputErr::Io(e)),
                     };
                     ret
@@ -188,10 +193,6 @@ pub fn start(
                         const INPUT_POLL_DELAY: Duration = Duration::from_millis(10);
                         thread::sleep(INPUT_POLL_DELAY);
                     }
-                    Err(InputErr::Quit) => {
-                        QUIT_REQUESTED.store(true, atomic::Ordering::Relaxed);
-                        return;
-                    }
                     Err(InputErr::Io(e)) => {
                         state.lock().unwrap().ui.error(e.to_string()).unwrap();
                         return;
@@ -205,6 +206,26 @@ pub fn start(
         }
     });
 
+    // ui message update thread
+    let _ = thread::spawn({
+        let state = Arc::clone(&state);
+        move || {
+            loop {
+                let res = (|| -> eyre::Result<()> {
+                    match ui_receiver.recv() {
+                        Ok(msg) => state.lock().unwrap().ui.handle_msg(msg),
+                        Err(_) => bail!("ui message channel closed"),
+                    }
+                })();
+
+                match res {
+                    Ok(()) => {}
+                    Err(report) => state.lock().unwrap().ui.error(report.to_string()).unwrap(),
+                }
+            }
+        }
+    });
+
     // call the init function that controls how to register
     init(&write_sender)?;
 
@@ -213,7 +234,6 @@ pub fn start(
     loop {
         if QUIT_REQUESTED.load(atomic::Ordering::Relaxed) {
             let ui = &mut state.lock().unwrap().ui;
-            let _ = ui.writeln("exiting");
             ui.disable();
             return Err(ExitReason::Quit);
         }
@@ -224,273 +244,20 @@ pub fn start(
         };
 
         let state = &mut *state.lock().unwrap();
-        if let Err(report) = on_msg(state, msg, &write_sender) {
-            // panic!("MEOW");
-            let _ = state
-                .ui
-                .writeln(format!("ERROR unable to handle message: {}", report));
-            QUIT_REQUESTED.store(true, atomic::Ordering::Relaxed);
+        match state.recv_msg(msg) {
+            Ok(()) => {}
+            Err(report) => {
+                let _ = state
+                    .ui
+                    .error(format!("unable to handle message: {}", report));
+                QUIT_REQUESTED.store(true, atomic::Ordering::Relaxed);
+            }
         }
     }
-}
-
-fn on_msg(
-    state: &mut ClientState,
-    msg: IRCMessage,
-    sender: &Sender<IRCMessage>,
-) -> eyre::Result<()> {
-    let ui = &mut state.ui;
-    // ui.writeln(
-    //     (SystemTime::now().duration_since(SystemTime::UNIX_EPOCH))
-    //         .unwrap()
-    //         .as_secs()
-    //         .to_string(),
-    // )?;
-    match msg.message {
-        // =====================
-        // PING
-        // =====================
-        Message::Ping(token) => sender.send(IRCMessage {
-            tags: None,
-            source: None,
-            message: Message::Pong(token.to_string()),
-        })?,
-
-        // =====================
-        // ERROR
-        // =====================
-        Message::Error(reason) => {
-            ui.error(reason.as_str())?;
-            // technically not a requested quit, but a requested quit exits silently
-            QUIT_REQUESTED.store(true, atomic::Ordering::Relaxed);
-        }
-
-        // =====================
-        // REGISTRATION
-        // =====================
-        Message::Numeric { num: 1, args } => {
-            let ClientState {
-                conn_state: ConnectionState::Registration(RegistrationState { requested_nick }),
-                ..
-            } = state
-            else {
-                ui.warn("001 when already registered")?;
-                return Ok(());
-            };
-
-            let [nick, msg, ..] = args.as_slice() else {
-                bail!("RPL_001 had no nick and msg arg");
-            };
-            let (Some(nick), Some(msg)) = (nick.as_str(), msg.as_str()) else {
-                bail!("nick must be a string argument");
-            };
-
-            if requested_nick != nick {
-                ui.writeln(format!(
-                    "WARNING: requested nick {}, but got nick {}",
-                    requested_nick, nick
-                ))?;
-            }
-
-            state.conn_state = ConnectionState::Connected(ConnectedState {
-                nick: nick.to_string(),
-                channels: Vec::new(),
-                messages_state: MessagesState {
-                    active_names: HashMap::new(),
-                },
-            });
-            ui.writeln(msg.to_string())?;
-        }
-
-        // =====================
-        // GREETING
-        // =====================
-        Message::Numeric { num: 2, args } => {
-            let [_, msg, ..] = args.as_slice() else {
-                bail!("RPL_YOURHOST missing msg");
-            };
-            let Some(msg) = msg.as_str() else {
-                bail!("RPL_YOURHOST msg not a string");
-            };
-            ui.writeln(msg.to_string())?;
-        }
-        Message::Numeric { num: 3, args } => {
-            let [_, msg, ..] = args.as_slice() else {
-                bail!("RPL_CREATED missing msg");
-            };
-            let Some(msg) = msg.as_str() else {
-                bail!("RPL_CREATED msg not a string");
-            };
-            ui.writeln(msg.to_string())?;
-        }
-        Message::Numeric { num: 4, args } => {
-            let [_, rest @ ..] = args.as_slice() else {
-                bail!("RPL_NUMERIC missing client arg");
-            };
-            let msg = rest
-                .iter()
-                .filter_map(Param::as_str)
-                .collect::<Vec<&str>>()
-                .join(" ");
-            ui.writeln(msg)?;
-        }
-        Message::Numeric { num: 5, args: _ } => {
-            //TODO: do we care about this?
-        }
-
-        // =====================
-        // CHANNEL STATE
-        // =====================
-        Message::Join(join_channels) => {
-            let ClientState {
-                conn_state: ConnectionState::Connected(ConnectedState { nick, channels, .. }),
-                ..
-            } = state
-            else {
-                bail!("JOIN messages can only be processed when connected to a server");
-            };
-            // let join_channels = join_channels
-            //     .into_iter()
-            //     .map(|(channel, _)| channel)
-            //     .collect::<Vec<_>>();
-
-            // if the source of the join is ourself, update the list of joined channels,
-            // otherwise announce a join
-            match msg.source.as_ref().map(|source| source.get_name()) {
-                Some(source) if source == nick => {
-                    for (channel, _) in join_channels.iter() {
-                        ui.writeln(
-                            Line::default()
-                                .push("joined ".green())
-                                .push(channel.clone().dark_blue()),
-                        )?;
-                        channels.push(Channel::new(channel)?);
-                    }
-                }
-                Some(other) => {
-                    for (channel, _) in join_channels.iter() {
-                        ui.writeln(
-                            Line::default()
-                                .push(other.magenta())
-                                .push(" joined ".green())
-                                .push(channel.clone().dark_blue()),
-                        )?;
-                    }
-                }
-                None => {
-                    ui.warn("JOIN msg without a source")?;
-                }
-            }
-
-            debug!("{:#?}", channels);
-        }
-
-        Message::Quit(reason) => {
-            let Some(name) = msg.source.as_ref().map(Source::get_name) else {
-                bail!("QUIT msg had no source");
-            };
-            // NOTE: servers SHOULD always send a reason, but make sure
-            let reason = reason.unwrap_or(String::from("disconnected"));
-            ui.writeln(format!("{} quit: {}", name, reason))?;
-        }
-
-        // =====================
-        // modes
-        // =====================
-        Message::Mode { target, mode } => {
-            let Some(mode) = mode else {
-                ui.warn(format!("server sent MODE for {} without modestr", target))?;
-                return Ok(());
-            };
-
-            let ClientState {
-                conn_state: ConnectionState::Connected(ConnectedState { channels, .. }),
-                ..
-            } = state
-            else {
-                ui.warn("must be connected to handle MODE")?;
-                return Ok(());
-            };
-
-            match TargetKind::new(target) {
-                TargetKind::Channel(channel) => {
-                    let Some(channel) = channels.iter_mut().find(|c| c.name() == channel) else {
-                        ui.warn(format!(
-                            "unexpected MODE for not joined channel {}",
-                            channel
-                        ))?;
-                        return Ok(());
-                    };
-
-                    channel.modes = mode;
-                }
-                TargetKind::Nickname(_) => {}
-                TargetKind::Unknown(_) => {
-                    ui.warn("could not determine target for MODE")?;
-                }
-            }
-
-            debug!("{:#?}", channels);
-        }
-
-        // =====================
-        // MESSAGES
-        // =====================
-        Message::Privmsg { msg: privmsg, .. } => {
-            // TODO: check whether target is channel vs user
-            let mut line = if let Some(source) = msg.source.as_ref() {
-                create_nick_line(source.get_name(), false)
-            } else {
-                Line::default()
-            };
-            line.extend(Line::default().push_unstyled(privmsg).into_iter());
-            ui.writeln(line)?;
-        }
-        Message::Notice {
-            msg: notice_msg, ..
-        } => {
-            let mut line = if let Some(source) = msg.source.as_ref() {
-                create_nick_line(source.get_name(), false)
-            } else {
-                Line::default()
-            };
-            line.extend(
-                Line::default()
-                    .push("NOTICE ".green())
-                    .push_unstyled(notice_msg)
-                    .into_iter(),
-            );
-            ui.writeln(line)?;
-        }
-
-        // =====================
-        // OTHER NUMERIC REPLIES
-        // =====================
-        msg @ Message::Numeric { .. } => {
-            handlers::numeric::handle(msg, state)?;
-        }
-
-        // =====================
-        // UNKNOWN
-        // =====================
-        unk => {
-            ui.warn(format!("unhandled msg {:?}", unk))?;
-        }
-    }
-    // ui.writeln(
-    //     (SystemTime::now().duration_since(SystemTime::UNIX_EPOCH))
-    //         .unwrap()
-    //         .as_secs()
-    //         .to_string(),
-    // )?;
-    Ok(())
 }
 
 #[derive(Debug, Error)]
 enum InputErr {
-    // client requested a quit
-    #[error("client requested a quit")]
-    Quit,
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]
@@ -500,16 +267,16 @@ enum InputErr {
 fn handle_input(
     state: &mut ClientState,
     sender: &Sender<IRCMessage>,
+    ui_sender: &Sender<UiMsg>,
     input: &str,
 ) -> Result<(), InputErr> {
-    let ui = &mut state.ui;
     // ui.debug(format!("input: {}", input))?;
     match state {
         ClientState {
             conn_state: ConnectionState::Registration(..),
             ..
         } => {
-            ui.warn("input during registration NYI")?;
+            ui_sender.send(UiMsg::Warn(String::from("input during registration NYI")));
             Ok(())
         }
         ClientState {
@@ -524,9 +291,11 @@ fn handle_input(
                 Ok(())
             } else {
                 if channels.len() == 0 {
-                    ui.warn("cannot send a message to 0 channels")?;
+                    ui_sender.send(UiMsg::Warn(String::from(
+                        "cannot send a message to 0 channels",
+                    )));
                 } else if channels.len() > 1 {
-                    ui.warn("multiple channels NYI")?;
+                    ui_sender.send(UiMsg::Warn(String::from("multiple channels NYI")));
                 } else {
                     sender
                         .send(IRCMessage {
@@ -538,29 +307,20 @@ fn handle_input(
                             },
                         })
                         .wrap_err("failed to send privmsg to writer thread")?;
-                    ui.writeln(
+                    let msg = UiMsg::Writeln(
                         Line::default()
                             .push_unstyled("<")
                             .push(nick.to_string().magenta().bold())
                             .push_unstyled(">")
                             .push_unstyled(input),
-                    )?;
+                    );
+                    ui_sender
+                        .send(msg)
+                        .map_err(|_| eyre!("could not send to closed ui msg channel"))?;
                 }
 
                 Ok(())
             }
         }
     }
-}
-
-fn create_nick_line(nick: &str, me: bool) -> Line<'static> {
-    let nick = if me {
-        nick.to_string().magenta().bold()
-    } else {
-        nick.to_string().magenta()
-    };
-    Line::default()
-        .push_unstyled("<")
-        .push(nick)
-        .push_unstyled(">")
 }

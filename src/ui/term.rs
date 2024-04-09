@@ -30,13 +30,20 @@ pub struct TerminalUi<'a> {
 #[derive(Debug)]
 pub enum InputStatus {
     Complete(String),
-    Incomplete,
-    Quit,
+    Incomplete { rerender: bool },
     IoErr(io::Error),
 }
 
+#[derive(Debug)]
+pub enum UiMsg<'a> {
+    Writeln(Line<'a>),
+    Warn(String),
+    /// cause the UI to render everything again, typically used in response to user input
+    ReRender,
+}
+
 impl<'a> TerminalUi<'a> {
-    pub fn new<W: io::Write + 'a + Send>(layout: Layout, writer: W) -> io::Result<Self> {
+    pub fn new<W: io::Write + 'a + Send>(layout: Layout, writer: W) -> eyre::Result<Self> {
         let mut terminal = Box::new(writer) as Box<dyn io::Write + Send>;
         execute!(terminal, terminal::EnterAlternateScreen)?;
         enable_raw_mode()?;
@@ -50,35 +57,40 @@ impl<'a> TerminalUi<'a> {
             input_buffer: InputBuffer::default(),
         };
         // force a re-render to move the cursor and add the input background
-        let _ = this.render();
+        this.render()?;
         Ok(this)
     }
 
-    pub fn writeln(&mut self, line: impl Into<Line<'a>>) -> eyre::Result<()> {
+    pub fn handle_msg(&mut self, msg: UiMsg<'a>) -> eyre::Result<()> {
+        debug!("{:#?}", msg);
+        match msg {
+            UiMsg::Writeln(line) => {
+                self.writeln(line)?;
+                self.render()?;
+            }
+            UiMsg::Warn(msg) => {
+                self.warn(msg)?;
+                self.render()?;
+            }
+            UiMsg::ReRender => {
+                self.render()?;
+            }
+        }
+        Ok(())
+    }
+
+    fn writeln(&mut self, line: impl Into<Line<'a>>) -> eyre::Result<()> {
         let line = line.into();
         info!("{}", line.fmt_unstyled());
         self.history.push_back(line);
-        // update the screen
-        self.render()?;
         Ok(())
     }
 
-    pub fn debug(&mut self, msg: impl Into<String>) -> eyre::Result<()> {
-        let msg = msg.into();
-        debug!("{}", msg);
-        self.history
-            .push_back(Line::default().push(format!("DEBUG: {}", msg).dark_grey()));
-        self.render()?;
-        Ok(())
-    }
-
-    pub fn warn(&mut self, msg: impl Into<String>) -> eyre::Result<()> {
+    fn warn(&mut self, msg: impl Into<String>) -> eyre::Result<()> {
         let msg = msg.into();
         warn!("{}", msg);
         self.history
             .push_back(Line::default().push(format!("WARN: {}", msg).yellow()));
-
-        self.render()?;
         Ok(())
     }
 
@@ -96,7 +108,8 @@ impl<'a> TerminalUi<'a> {
 
         match event::poll(POLL_TIMEOUT) {
             Ok(true) => {}
-            Ok(false) => return InputStatus::Incomplete,
+            // don't need to re-render if there's not a message to handle
+            Ok(false) => return InputStatus::Incomplete { rerender: false },
             Err(e) => return InputStatus::IoErr(e),
         }
 
@@ -111,7 +124,8 @@ impl<'a> TerminalUi<'a> {
             }) => {
                 // only detecting key down
                 if kind != KeyEventKind::Press {
-                    return InputStatus::Incomplete;
+                    // don't need to re-render if we do nothing
+                    return InputStatus::Incomplete { rerender: false };
                 }
 
                 // KEYBINDS
@@ -124,41 +138,35 @@ impl<'a> TerminalUi<'a> {
                                     self.scrollback.saturating_add(1),
                                     self.history.len().saturating_sub(1),
                                 );
-                                self.render();
-                                InputStatus::Incomplete
+                                InputStatus::Incomplete { rerender: true }
                             }
                             'n' => {
                                 // this can never over-scroll because saturating caps at 0
                                 self.scrollback = self.scrollback.saturating_sub(1);
-                                self.render();
-                                InputStatus::Incomplete
+                                InputStatus::Incomplete { rerender: true }
                             }
                             'f' => {
                                 self.input_buffer.offset(1);
-                                self.render();
-                                InputStatus::Incomplete
+                                InputStatus::Incomplete { rerender: true }
                             }
                             'b' => {
                                 self.input_buffer.offset(-1);
-                                self.render();
-                                InputStatus::Incomplete
+                                InputStatus::Incomplete { rerender: true }
                             }
                             'a' => {
                                 self.input_buffer.select(0);
-                                self.render();
-                                InputStatus::Incomplete
+                                InputStatus::Incomplete { rerender: true }
                             }
                             'e' => {
                                 self.input_buffer.select(self.input_buffer.buffer().len());
-                                self.render();
-                                InputStatus::Incomplete
+                                InputStatus::Incomplete { rerender: true }
                             }
                             'd' => {
                                 self.input_buffer.delete();
-                                self.render();
-                                InputStatus::Incomplete
+                                InputStatus::Incomplete { rerender: true }
                             }
-                            _ => InputStatus::Incomplete,
+                            // didn't handle a command, don't rerender
+                            _ => InputStatus::Incomplete { rerender: false },
                         };
                         return status;
                     }
@@ -168,18 +176,15 @@ impl<'a> TerminalUi<'a> {
                     KeyCode::Enter => InputStatus::Complete(self.input_buffer.finish()),
                     KeyCode::Char(c) => {
                         self.input_buffer.insert(c);
-                        self.render();
-                        InputStatus::Incomplete
+                        InputStatus::Incomplete { rerender: true }
                     }
                     KeyCode::Backspace => {
                         self.input_buffer.backspace();
-                        self.render();
-                        InputStatus::Incomplete
+                        InputStatus::Incomplete { rerender: true }
                     }
                     KeyCode::Delete => {
                         self.input_buffer.delete();
-                        self.render();
-                        InputStatus::Incomplete
+                        InputStatus::Incomplete { rerender: true }
                     }
 
                     KeyCode::Right
@@ -204,15 +209,12 @@ impl<'a> TerminalUi<'a> {
                     | KeyCode::KeypadBegin
                     | KeyCode::Media(_)
                     | KeyCode::Esc
-                    | KeyCode::Modifier(_) => InputStatus::Incomplete,
+                    | KeyCode::Modifier(_) => InputStatus::Incomplete { rerender: false },
                 }
             }
-            Event::Resize(_, _) => {
-                self.render();
-                InputStatus::Incomplete
-            }
+            Event::Resize(_, _) => InputStatus::Incomplete { rerender: true },
             Event::FocusGained | Event::FocusLost | Event::Mouse(_) | Event::Paste(_) => {
-                InputStatus::Incomplete
+                InputStatus::Incomplete { rerender: false }
             }
         }
     }

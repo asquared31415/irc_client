@@ -7,9 +7,13 @@
     utf8_chunks
 )]
 
-use std::sync::mpsc::Sender;
+use std::{
+    panic::{catch_unwind, resume_unwind},
+    sync::mpsc::Sender,
+};
 
 use clap::Parser;
+use crossterm::terminal;
 use eyre::{bail, eyre};
 use log::LevelFilter;
 
@@ -87,11 +91,19 @@ fn main() -> eyre::Result<()> {
         Ok(())
     };
 
-    match client::start(addr.as_str(), nick.as_str(), tls, client_on_start) {
-        // client.start() never returns Ok
-        Ok(_) => unreachable!(),
-        // no need to report anything on a requsted quit
-        Err(ExitReason::Quit) => return Ok(()),
-        Err(e) => return Err(e.into()),
+    match catch_unwind(|| client::start(addr.as_str(), nick.as_str(), tls, client_on_start)) {
+        Ok(res) => {
+            match res {
+                // client.start() never returns Ok
+                Ok(_) => unreachable!(),
+                // no need to report anything on a requsted quit
+                Err(ExitReason::Quit) => return Ok(()),
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Err(payload) => {
+            terminal::disable_raw_mode()?;
+            resume_unwind(payload)
+        }
     }
 }

@@ -221,8 +221,9 @@ impl<'a> Display for DynStyledContentWrapper<'a> {
 
 impl<'a> Debug for DynStyledContentWrapper<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("DynStyledContentWrapper")
-            .field(&self.to_string())
+        f.debug_struct("DynStyledContentWrapper")
+            .field("style", &self.style)
+            .field("content", &self.content.to_string())
             .finish()
     }
 }
