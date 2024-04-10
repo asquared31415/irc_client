@@ -15,6 +15,7 @@ use std::{
 
 use crossterm::style::Stylize;
 use eyre::{bail, eyre, Context};
+use log::error;
 use rustls::{pki_types::ServerName, ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use thiserror::Error;
 

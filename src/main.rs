@@ -8,14 +8,14 @@
 )]
 
 use std::{
-    panic::{catch_unwind, resume_unwind},
+    panic::{catch_unwind, resume_unwind, set_hook},
     sync::mpsc::Sender,
 };
 
 use clap::Parser;
-use crossterm::terminal;
+use crossterm::{execute, terminal};
 use eyre::{bail, eyre};
-use log::LevelFilter;
+use log::{debug, error, LevelFilter};
 
 use crate::{
     client::ExitReason,
@@ -52,7 +52,17 @@ struct Cli {
 }
 
 fn main() -> eyre::Result<()> {
-    color_eyre::install()?;
+    let (panic_hook, eyre_hook) = color_eyre::config::HookBuilder::new().into_hooks();
+    eyre_hook.install()?;
+    set_hook(Box::new({
+        let panic_hook = panic_hook.into_panic_hook();
+        move |panic_info| {
+            let _ = terminal::disable_raw_mode();
+            let _ = execute!(std::io::stdout(), terminal::LeaveAlternateScreen);
+            panic_hook(panic_info);
+            std::process::abort()
+        }
+    }));
 
     let Cli {
         addr,
@@ -91,19 +101,11 @@ fn main() -> eyre::Result<()> {
         Ok(())
     };
 
-    match catch_unwind(|| client::start(addr.as_str(), nick.as_str(), tls, client_on_start)) {
-        Ok(res) => {
-            match res {
-                // client.start() never returns Ok
-                Ok(_) => unreachable!(),
-                // no need to report anything on a requsted quit
-                Err(ExitReason::Quit) => return Ok(()),
-                Err(e) => return Err(e.into()),
-            }
-        }
-        Err(payload) => {
-            terminal::disable_raw_mode()?;
-            resume_unwind(payload)
-        }
+    match client::start(addr.as_str(), nick.as_str(), tls, client_on_start) {
+        // client.start() never returns Ok
+        Ok(_) => unreachable!(),
+        // no need to report anything on a requsted quit
+        Err(ExitReason::Quit) => return Ok(()),
+        Err(e) => return Err(e.into()),
     }
 }

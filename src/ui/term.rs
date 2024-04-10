@@ -6,7 +6,7 @@ use crossterm::{
     event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     execute,
     style::Stylize,
-    terminal::{self, disable_raw_mode, enable_raw_mode, ClearType},
+    terminal,
 };
 use eyre::bail;
 use log::{debug, error, info, trace, warn};
@@ -46,8 +46,8 @@ impl<'a> TerminalUi<'a> {
     pub fn new<W: io::Write + 'a + Send>(layout: Layout, writer: W) -> eyre::Result<Self> {
         let mut terminal = Box::new(writer) as Box<dyn io::Write + Send>;
         execute!(terminal, terminal::EnterAlternateScreen)?;
-        enable_raw_mode()?;
-        execute!(terminal, terminal::Clear(ClearType::Purge))?;
+        terminal::enable_raw_mode()?;
+        execute!(terminal, terminal::Clear(terminal::ClearType::Purge))?;
 
         let mut this = Self {
             terminal,
@@ -222,7 +222,7 @@ impl<'a> TerminalUi<'a> {
     pub fn disable(&mut self) {
         execute!(self.terminal, terminal::LeaveAlternateScreen)
             .expect("unable to leave alternate screen");
-        disable_raw_mode().expect("unable to disable raw mode");
+        terminal::disable_raw_mode().expect("unable to disable raw mode");
     }
 
     pub fn render(&mut self) -> eyre::Result<()> {
@@ -263,7 +263,7 @@ impl<'a> TerminalUi<'a> {
         }
 
         // TODO: save and restore cursor pos?
-        execute!(self.terminal, terminal::Clear(ClearType::All))?;
+        execute!(self.terminal, terminal::Clear(terminal::ClearType::All))?;
 
         let mut draw_rect = *main_rect;
         for line in shown_lines.iter() {
