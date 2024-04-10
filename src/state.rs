@@ -198,7 +198,7 @@ impl<'a> ClientState<'a> {
                 self.ui_sender.send(UiMsg::Writeln(
                     Line::default()
                         .push(name.magenta())
-                        .push_unstyled("quit: ")
+                        .push_unstyled(" quit: ")
                         .push_unstyled(reason),
                 ));
             }
