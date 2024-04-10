@@ -38,6 +38,8 @@ pub enum InputStatus {
 pub enum UiMsg<'a> {
     Writeln(Line<'a>),
     Warn(String),
+    /// a ***non-fatal*** error, typically used in response to invalid user input that is handled
+    Error(String),
     /// cause the UI to render everything again, typically used in response to user input
     ReRender,
 }
@@ -73,6 +75,10 @@ impl<'a> TerminalUi<'a> {
                 self.render()?;
             }
             UiMsg::ReRender => {
+                self.render()?;
+            }
+            UiMsg::Error(msg) => {
+                self.error(msg)?;
                 self.render()?;
             }
         }

@@ -285,11 +285,16 @@ fn handle_input(
             ..
         } => {
             if let Some((_, input)) = input.split_prefix('/') {
-                let cmd = Command::parse(input)
-                    .wrap_err_with(|| format!("failed to parse command {:?}", input))?;
-                cmd.handle(state, sender)?;
-
-                Ok(())
+                match Command::parse(input) {
+                    Ok(cmd) => {
+                        cmd.handle(state, sender)?;
+                        Ok(())
+                    }
+                    Err(e) => {
+                        ui_sender.send(UiMsg::Error(format!("failed to parse command: {}", e)));
+                        Ok(())
+                    }
+                }
             } else {
                 if channels.len() == 0 {
                     ui_sender.send(UiMsg::Warn(String::from(
