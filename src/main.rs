@@ -4,18 +4,16 @@
     let_chains,
     lazy_cell,
     thread_id_value,
-    utf8_chunks
+    utf8_chunks,
+    round_char_boundary
 )]
 
-use std::{
-    panic::{catch_unwind, resume_unwind, set_hook},
-    sync::mpsc::Sender,
-};
+use std::{panic::set_hook, sync::mpsc::Sender};
 
 use clap::Parser;
 use crossterm::{execute, terminal};
 use eyre::{bail, eyre};
-use log::{debug, error, LevelFilter};
+use log::*;
 
 use crate::{
     client::ExitReason,

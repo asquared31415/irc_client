@@ -293,23 +293,26 @@ impl<'a> TerminalUi<'a> {
         let input_width = input_rect.width.saturating_sub(INPUT_BUFFER_PAD);
         let (input_text, cursor_col) = self.input_buffer.get_visible_area(input_width);
         trace!("input_text {:?}, cursor_col {}", input_text, cursor_col);
-        let mut input_text = input_text.to_string();
 
-        // re-pad with spaces
-        let needed_pad = usize::from(input_rect.width).saturating_sub(input_text.len());
-        if needed_pad > 0 {
-            trace!("padding with {} spaces", needed_pad);
-            input_text.push_str(" ".repeat(needed_pad).as_str());
-        }
+        let config = DrawTextConfig {
+            // note: this does not matter, we always send exactly enough characters
+            wrap: WrapMode::Truncate,
+        };
 
+        //pad with spaces
+        text::draw_text(
+            &mut self.terminal,
+            *input_rect,
+            &Line::default().push(" ".repeat(usize::from(input_rect.width)).on_blue()),
+            config,
+        )?;
+
+        // draw the actual text
         text::draw_text(
             &mut self.terminal,
             *input_rect,
             &Line::default().push(input_text.white().on_blue()),
-            DrawTextConfig {
-                // note: this does not matter, we always send exactly enough characters
-                wrap: WrapMode::Truncate,
-            },
+            config,
         )?;
 
         execute!(self.terminal, cursor::MoveToColumn(cursor_col as u16))?;
