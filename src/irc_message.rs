@@ -19,6 +19,7 @@ macro_rules! expect_string_param {
     }};
 }
 
+#[derive(Clone)]
 pub struct Source(String);
 
 impl Source {
@@ -52,7 +53,7 @@ impl Display for Source {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IRCMessage {
     pub tags: Option<()>,
     pub source: Option<Source>,
@@ -151,7 +152,7 @@ pub enum MessageParseErr {
 
 // FIXME: remove this once all variants can be constructed
 #[allow(unused)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Message {
     Cap, // FIXME: missing args
     Authenticate,
@@ -602,7 +603,7 @@ impl Message {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Param {
     String(String),
     List(Vec<String>),

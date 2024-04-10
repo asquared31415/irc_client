@@ -14,12 +14,13 @@ use crate::{
         term::{TerminalUi, UiMsg},
         text::Line,
     },
-    util::TargetKind,
+    util::Target,
 };
 
 pub struct ClientState<'a> {
     pub ui: TerminalUi<'a>,
     messages: Vec<IRCMessage>,
+    target_messages: HashMap<Target, Vec<IRCMessage>>,
     pub conn_state: ConnectionState,
     sender: Sender<IRCMessage>,
     pub ui_sender: Sender<UiMsg<'a>>,
@@ -35,6 +36,7 @@ impl<'a> ClientState<'a> {
         Self {
             ui,
             messages: Vec::new(),
+            target_messages: HashMap::new(),
             conn_state: ConnectionState::Registration(RegistrationState { requested_nick }),
             sender,
             ui_sender,
@@ -60,6 +62,10 @@ impl<'a> ClientState<'a> {
             // =====================
             Message::Error(reason) => {
                 ui.error(reason.as_str())?;
+                self.target_messages
+                    .entry(Target::Status)
+                    .or_default()
+                    .push(msg.clone());
                 // technically not a requested quit, but a requested quit exits silently
                 QUIT_REQUESTED.store(true, atomic::Ordering::Relaxed);
             }
@@ -78,10 +84,10 @@ impl<'a> ClientState<'a> {
                     return Ok(());
                 };
 
-                let [nick, msg, ..] = args.as_slice() else {
+                let [nick, text, ..] = args.as_slice() else {
                     bail!("RPL_001 had no nick and msg arg");
                 };
-                let (Some(nick), Some(msg)) = (nick.as_str(), msg.as_str()) else {
+                let (Some(nick), Some(text)) = (nick.as_str(), text.as_str()) else {
                     bail!("nick must be a string argument");
                 };
 
@@ -100,45 +106,65 @@ impl<'a> ClientState<'a> {
                     },
                 });
                 self.ui_sender
-                    .send(UiMsg::Writeln(Line::from(msg.to_string())));
+                    .send(UiMsg::Writeln(Line::from(text.to_string())));
+                self.target_messages
+                    .entry(Target::Status)
+                    .or_default()
+                    .push(msg.clone());
             }
 
             // =====================
             // GREETING
             // =====================
             Message::Numeric { num: 2, args } => {
-                let [_, msg, ..] = args.as_slice() else {
+                let [_, text, ..] = args.as_slice() else {
                     bail!("RPL_YOURHOST missing msg");
                 };
-                let Some(msg) = msg.as_str() else {
+                let Some(text) = text.as_str() else {
                     bail!("RPL_YOURHOST msg not a string");
                 };
                 self.ui_sender
-                    .send(UiMsg::Writeln(Line::from(msg.to_string())));
+                    .send(UiMsg::Writeln(Line::from(text.to_string())));
+                self.target_messages
+                    .entry(Target::Status)
+                    .or_default()
+                    .push(msg.clone());
             }
             Message::Numeric { num: 3, args } => {
-                let [_, msg, ..] = args.as_slice() else {
+                let [_, text, ..] = args.as_slice() else {
                     bail!("RPL_CREATED missing msg");
                 };
-                let Some(msg) = msg.as_str() else {
+                let Some(text) = text.as_str() else {
                     bail!("RPL_CREATED msg not a string");
                 };
                 self.ui_sender
-                    .send(UiMsg::Writeln(Line::from(msg.to_string())));
+                    .send(UiMsg::Writeln(Line::from(text.to_string())));
+                self.target_messages
+                    .entry(Target::Status)
+                    .or_default()
+                    .push(msg.clone());
             }
             Message::Numeric { num: 4, args } => {
                 let [_, rest @ ..] = args.as_slice() else {
                     bail!("RPL_NUMERIC missing client arg");
                 };
-                let msg = rest
+                let text = rest
                     .iter()
                     .filter_map(Param::as_str)
                     .collect::<Vec<&str>>()
                     .join(" ");
-                self.ui_sender.send(UiMsg::Writeln(Line::from(msg)));
+                self.ui_sender.send(UiMsg::Writeln(Line::from(text)));
+                self.target_messages
+                    .entry(Target::Status)
+                    .or_default()
+                    .push(msg.clone());
             }
             Message::Numeric { num: 5, args: _ } => {
                 //TODO: do we care about this?
+                self.target_messages
+                    .entry(Target::Status)
+                    .or_default()
+                    .push(msg.clone());
             }
 
             // =====================
@@ -152,32 +178,35 @@ impl<'a> ClientState<'a> {
                 else {
                     bail!("JOIN messages can only be processed when connected to a server");
                 };
-                // let join_channels = join_channels
-                //     .into_iter()
-                //     .map(|(channel, _)| channel)
-                //     .collect::<Vec<_>>();
 
                 // if the source of the join is ourself, update the list of joined channels,
                 // otherwise announce a join
                 match msg.source.as_ref().map(|source| source.get_name()) {
-                    Some(source) if source == nick => {
-                        for (channel, _) in join_channels.iter() {
+                    Some(join_nick) => {
+                        let join_channels = join_channels.iter().filter_map(|(channel, _)| {
+                            if let Some(channel @ Target::Channel(_)) = Target::new(channel) {
+                                Some(channel)
+                            } else {
+                                None
+                            }
+                        });
+                        for channel in join_channels {
                             self.ui_sender.send(UiMsg::Writeln(
                                 Line::default()
-                                    .push("joined ".green())
-                                    .push(channel.clone().dark_blue()),
-                            ));
-                            channels.push(Channel::new(channel)?);
-                        }
-                    }
-                    Some(other) => {
-                        for (channel, _) in join_channels.iter() {
-                            self.ui_sender.send(UiMsg::Writeln(
-                                Line::default()
-                                    .push(other.magenta())
+                                    .push(join_nick.magenta())
                                     .push(" joined ".green())
-                                    .push(channel.clone().dark_blue()),
+                                    .push(channel.as_str().dark_blue()),
                             ));
+
+                            // if we were the ones joining the channel, track that
+                            if join_nick == nick {
+                                channels.push(Channel::new(channel.as_str())?);
+                            }
+
+                            self.target_messages
+                                .entry(channel)
+                                .or_default()
+                                .push(msg.clone());
                         }
                     }
                     None => {
@@ -201,6 +230,10 @@ impl<'a> ClientState<'a> {
                         .push_unstyled(" quit: ")
                         .push_unstyled(reason),
                 ));
+                self.target_messages
+                    .entry(Target::Status)
+                    .or_default()
+                    .push(msg.clone());
             }
 
             // =====================
@@ -226,21 +259,29 @@ impl<'a> ClientState<'a> {
                     return Ok(());
                 };
 
-                match TargetKind::new(target) {
-                    TargetKind::Channel(channel) => {
-                        let Some(channel) = channels.iter_mut().find(|c| c.name() == channel)
+                match Target::new(target) {
+                    Some(Target::Channel(channel_name)) => {
+                        let Some(channel) = channels.iter_mut().find(|c| c.name() == channel_name)
                         else {
                             self.ui_sender.send(UiMsg::Warn(format!(
                                 "unexpected MODE for not joined channel {}",
-                                channel
+                                channel_name
                             )));
                             return Ok(());
                         };
 
                         channel.modes = mode.to_string();
+
+                        self.target_messages
+                            .entry(Target::Channel(channel_name))
+                            .or_default()
+                            .push(msg.clone());
                     }
-                    TargetKind::Nickname(_) => {}
-                    TargetKind::Unknown(_) => {
+                    Some(Target::Nickname(_)) => {
+                        self.ui_sender
+                            .send(UiMsg::Warn(String::from("MODE for nicknames NYI")));
+                    }
+                    _ => {
                         self.ui_sender.send(UiMsg::Warn(String::from(
                             "could not determine target for MODE",
                         )));
@@ -253,7 +294,10 @@ impl<'a> ClientState<'a> {
             // =====================
             // MESSAGES
             // =====================
-            Message::Privmsg { msg: privmsg, .. } => {
+            Message::Privmsg {
+                targets,
+                msg: privmsg,
+            } => {
                 // TODO: check whether target is channel vs user
                 let mut line = if let Some(source) = msg.source.as_ref() {
                     create_nick_line(source.get_name(), false)
@@ -262,9 +306,18 @@ impl<'a> ClientState<'a> {
                 };
                 line.extend(Line::default().push_unstyled(privmsg).into_iter());
                 self.ui_sender.send(UiMsg::Writeln(line));
+
+                let targets = targets.iter().filter_map(Target::new);
+                for target in targets {
+                    self.target_messages
+                        .entry(target)
+                        .or_default()
+                        .push(msg.clone());
+                }
             }
             Message::Notice {
-                msg: notice_msg, ..
+                targets,
+                msg: notice_msg,
             } => {
                 let mut line = if let Some(source) = msg.source.as_ref() {
                     create_nick_line(source.get_name(), false)
@@ -278,6 +331,14 @@ impl<'a> ClientState<'a> {
                         .into_iter(),
                 );
                 self.ui_sender.send(UiMsg::Writeln(line));
+
+                let targets = targets.iter().filter_map(Target::new);
+                for target in targets {
+                    self.target_messages
+                        .entry(target)
+                        .or_default()
+                        .push(msg.clone());
+                }
             }
 
             // =====================
@@ -297,6 +358,9 @@ impl<'a> ClientState<'a> {
         }
 
         self.messages.push(msg);
+
+        debug!("targets: {:#?}", self.target_messages);
+
         Ok(())
     }
 }
