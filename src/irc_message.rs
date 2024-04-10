@@ -1,11 +1,11 @@
 use core::{
     cmp,
-    fmt::{Debug, Display},
+    fmt::{Debug, Display, Write as _},
 };
 
 use thiserror::Error;
 
-use crate::ext::StrExt as _;
+use crate::{ext::StrExt as _, util::Target};
 
 // expects a parameter to be a string parameter, and extracts it, otherwise returns an invalid param
 // err.
@@ -28,12 +28,6 @@ impl Source {
             .split_once('!')
             .map(|(name, _)| name)
             .unwrap_or(self.0.as_str())
-    }
-
-    pub fn muew() {}
-
-    pub fn new(source: String) -> Self {
-        Self(source)
     }
 }
 
@@ -76,6 +70,8 @@ pub enum MessageToStringErr {
     ClientMayNotCreate(String),
     #[error("clients must not send a source with their messages")]
     ClientMustNotSendSource,
+    #[error("message had invalid params")]
+    InvalidParams,
 }
 
 impl IRCMessage {
@@ -211,17 +207,17 @@ pub enum Message {
     },
     Info,
     Mode {
-        target: String,
+        target: Target,
         mode: Option<String>,
     },
 
     // messages
     Privmsg {
-        targets: Vec<String>,
+        targets: Vec<Target>,
         msg: String,
     },
     Notice {
-        targets: Vec<String>,
+        targets: Vec<Target>,
         msg: String,
     },
 
@@ -418,7 +414,9 @@ impl Message {
                 let [target, rest @ ..] = args.as_slice() else {
                     return Err(MessageParseErr::MissingParams(s.to_string()));
                 };
-                let target = expect_string_param!(target);
+                let Some(target) = Target::new(expect_string_param!(target)) else {
+                    return Err(MessageParseErr::InvalidParams);
+                };
 
                 let mode = match rest {
                     [] => None,
@@ -439,7 +437,11 @@ impl Message {
                 let [targets, msg, ..] = args.as_slice() else {
                     return Err(MessageParseErr::MissingParams(s.to_string()));
                 };
-                let targets = targets.optional_list();
+                let targets = targets
+                    .optional_list()
+                    .into_iter()
+                    .filter_map(Target::new)
+                    .collect();
                 let msg = expect_string_param!(msg);
                 Ok(Message::Privmsg { targets, msg })
             }
@@ -447,7 +449,11 @@ impl Message {
                 let [targets, msg, ..] = args.as_slice() else {
                     return Err(MessageParseErr::MissingParams(s.to_string()));
                 };
-                let targets = targets.optional_list();
+                let targets = targets
+                    .optional_list()
+                    .into_iter()
+                    .filter_map(Target::new)
+                    .collect();
                 let msg = expect_string_param!(msg);
                 Ok(Message::Notice { targets, msg })
             }
@@ -570,7 +576,21 @@ impl Message {
             Message::Info => todo!(),
             Message::Mode { target, mode } => todo!(),
             Message::Privmsg { targets, msg } => {
-                format!("PRIVMSG {} :{}", targets.join(","), msg)
+                let mut target_str = String::new();
+                match targets.as_slice() {
+                    [] => {
+                        return Err(MessageToStringErr::InvalidParams);
+                    }
+                    [start @ .., last] => {
+                        for target in start {
+                            // UNWRAP: writing to a string is infallible
+                            write!(&mut target_str, "{},", target.as_str()).unwrap();
+                        }
+                        target_str.push_str(last.as_str());
+                    }
+                }
+
+                format!("PRIVMSG {} :{}", target_str, msg)
             }
             Message::Notice { targets, msg: text } => todo!(),
             Message::Who { mask } => todo!(),

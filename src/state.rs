@@ -259,8 +259,8 @@ impl<'a> ClientState<'a> {
                     return Ok(());
                 };
 
-                match Target::new(target) {
-                    Some(Target::Channel(channel_name)) => {
+                match target {
+                    Target::Channel(channel_name) => {
                         let Some(channel) = channels.iter_mut().find(|c| c.name() == channel_name)
                         else {
                             self.ui_sender.send(UiMsg::Warn(format!(
@@ -273,11 +273,11 @@ impl<'a> ClientState<'a> {
                         channel.modes = mode.to_string();
 
                         self.target_messages
-                            .entry(Target::Channel(channel_name))
+                            .entry(Target::Channel(channel_name.clone()))
                             .or_default()
                             .push(msg.clone());
                     }
-                    Some(Target::Nickname(_)) => {
+                    Target::Nickname(_) => {
                         self.ui_sender
                             .send(UiMsg::Warn(String::from("MODE for nicknames NYI")));
                     }
@@ -307,10 +307,9 @@ impl<'a> ClientState<'a> {
                 line.extend(Line::default().push_unstyled(privmsg).into_iter());
                 self.ui_sender.send(UiMsg::Writeln(line));
 
-                let targets = targets.iter().filter_map(Target::new);
                 for target in targets {
                     self.target_messages
-                        .entry(target)
+                        .entry(target.clone())
                         .or_default()
                         .push(msg.clone());
                 }
@@ -332,10 +331,9 @@ impl<'a> ClientState<'a> {
                 );
                 self.ui_sender.send(UiMsg::Writeln(line));
 
-                let targets = targets.iter().filter_map(Target::new);
                 for target in targets {
                     self.target_messages
-                        .entry(target)
+                        .entry(target.clone())
                         .or_default()
                         .push(msg.clone());
                 }

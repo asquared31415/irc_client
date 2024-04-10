@@ -30,6 +30,7 @@ use crate::{
         term::{InputStatus, TerminalUi, UiMsg},
         text::Line,
     },
+    util::Target,
 };
 
 #[derive(Debug, Error)]
@@ -308,7 +309,10 @@ fn handle_input(
                             tags: None,
                             source: None,
                             message: Message::Privmsg {
-                                targets: channels.iter().map(|c| c.name().to_string()).collect(),
+                                targets: channels
+                                    .iter()
+                                    .map(|c| Target::Channel(c.name().to_string()))
+                                    .collect(),
                                 msg: input.to_string(),
                             },
                         })

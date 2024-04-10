@@ -1,3 +1,5 @@
+use core::fmt::Display;
+
 use crate::constants::names::{
     CHANNEL_MEMBERSHIP_PREFIXES, CHANNEL_TYPES, INVALID_NICKNAME_CHARACTERS, INVALID_NICKNAME_START,
 };
@@ -37,5 +39,11 @@ impl Target {
             Target::Nickname(nick) => nick.as_str(),
             Target::Status => "[STATUS]",
         }
+    }
+}
+
+impl Display for Target {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
