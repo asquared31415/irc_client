@@ -1,13 +1,22 @@
 use core::sync::atomic;
 use std::sync::mpsc::Sender;
 
-use eyre::bail;
+use eyre::eyre;
 use thiserror::Error;
 
 use crate::{
     irc_message::{IRCMessage, Message},
     state::{ClientState, ConnectionState},
 };
+
+macro_rules! expect_connected_state {
+    ($state:expr, $cmd:literal) => {
+        match &mut $state.conn_state {
+            ConnectionState::Connected(c) => Ok(c),
+            _ => Err(eyre!("cannot handle command {} when not registered", $cmd)),
+        }
+    };
+}
 
 #[derive(Debug)]
 pub enum Command {
@@ -70,13 +79,8 @@ impl Command {
     pub fn handle(&self, state: &mut ClientState, sender: &Sender<IRCMessage>) -> eyre::Result<()> {
         match self {
             Command::Join(channel) => {
-                let ClientState {
-                    conn_state: ConnectionState::Connected(..),
-                    ..
-                } = state
-                else {
-                    bail!("can only join when connected");
-                };
+                // don't need to access the state here, just need to ensure connected
+                let _ = expect_connected_state!(state, "JOIN")?;
 
                 sender.send(IRCMessage {
                     tags: None,
@@ -85,13 +89,8 @@ impl Command {
                 })?;
             }
             Command::Raw(text) => {
-                let ClientState {
-                    conn_state: ConnectionState::Connected(..),
-                    ..
-                } = state
-                else {
-                    bail!("can only join when connected");
-                };
+                // don't need to access the state here, just need to ensure connected
+                let _ = expect_connected_state!(state, "RAW")?;
 
                 sender.send(IRCMessage {
                     tags: None,

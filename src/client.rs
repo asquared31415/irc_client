@@ -13,7 +13,7 @@ use std::{
     thread,
 };
 
-use crossterm::style::Stylize;
+use crossterm::style::Stylize as _;
 use eyre::{bail, eyre, Context};
 use log::{debug, error};
 use rustls::{pki_types::ServerName, ClientConfig, ClientConnection, RootCertStore, StreamOwned};
@@ -251,10 +251,11 @@ pub fn start(
     }
 }
 
+/// describes **fatal** errors in input handling.
 #[derive(Debug, Error)]
 enum InputErr {
     #[error(transparent)]
-    Io(#[from] io::Error),
+    Io(io::Error),
     #[error(transparent)]
     Other(#[from] eyre::Report),
 }
@@ -266,64 +267,69 @@ fn handle_input(
     input: &str,
 ) -> Result<(), InputErr> {
     // ui.debug(format!("input: {}", input))?;
-    match state {
-        ClientState {
-            conn_state: ConnectionState::Registration(..),
-            ..
-        } => {
-            ui_sender.send(UiMsg::Warn(String::from("input during registration NYI")));
-            Ok(())
-        }
-        ClientState {
-            conn_state: ConnectionState::Connected(ConnectedState { nick, channels, .. }),
-            ..
-        } => {
-            if let Some((_, input)) = input.split_prefix('/') {
-                match Command::parse(input) {
-                    Ok(cmd) => {
-                        cmd.handle(state, sender)?;
-                        Ok(())
-                    }
-                    Err(e) => {
-                        ui_sender.send(UiMsg::Error(format!("failed to parse command: {}", e)));
-                        Ok(())
-                    }
-                }
-            } else {
-                if channels.len() == 0 {
-                    ui_sender.send(UiMsg::Warn(String::from(
-                        "cannot send a message to 0 channels",
-                    )));
-                } else if channels.len() > 1 {
-                    ui_sender.send(UiMsg::Warn(String::from("multiple channels NYI")));
-                } else {
-                    sender
-                        .send(IRCMessage {
-                            tags: None,
-                            source: None,
-                            message: Message::Privmsg {
-                                targets: channels
-                                    .iter()
-                                    .map(|c| Target::Channel(c.name().to_string()))
-                                    .collect(),
-                                msg: input.to_string(),
-                            },
-                        })
-                        .wrap_err("failed to send privmsg to writer thread")?;
-                    let msg = UiMsg::Writeln(
-                        Line::default()
-                            .push_unstyled("<")
-                            .push(nick.to_string().magenta().bold())
-                            .push_unstyled(">")
-                            .push_unstyled(input),
-                    );
-                    ui_sender
-                        .send(msg)
-                        .map_err(|_| eyre!("could not send to closed ui msg channel"))?;
-                }
 
+    match input.split_prefix('/') {
+        Some((_, input)) => match Command::parse(input) {
+            Ok(cmd) => {
+                match cmd.handle(state, sender) {
+                    Ok(()) => {}
+                    Err(report) => {
+                        ui_sender.send(UiMsg::Error(report.to_string()));
+                    }
+                }
+                // even if the command cannot be handled, that's not a fatal error
                 Ok(())
             }
+            Err(e) => {
+                ui_sender.send(UiMsg::Error(format!("failed to parse command: {}", e)));
+                // failure to parse is never fatal
+                Ok(())
+            }
+        },
+        None => {
+            let ConnectionState::Connected(ConnectedState { nick, channels, .. }) =
+                &mut state.conn_state
+            else {
+                state.ui_sender.send(UiMsg::Error(String::from(
+                    "cannot send message when not registered",
+                )));
+                // this is not a fatal error, it likely means that the connection was slow
+                return Ok(());
+            };
+
+            if channels.len() == 0 {
+                ui_sender.send(UiMsg::Warn(String::from(
+                    "cannot send a message to 0 channels",
+                )));
+            } else if channels.len() > 1 {
+                ui_sender.send(UiMsg::Warn(String::from("multiple channels NYI")));
+            } else {
+                sender
+                    .send(IRCMessage {
+                        tags: None,
+                        source: None,
+                        message: Message::Privmsg {
+                            targets: channels
+                                .iter()
+                                .map(|c| Target::Channel(c.name().to_string()))
+                                .collect(),
+                            msg: input.to_string(),
+                        },
+                    })
+                    .wrap_err("failed to send privmsg to writer thread")?;
+                let msg = UiMsg::Writeln(
+                    Line::default()
+                        .push_unstyled("<")
+                        .push(nick.to_string().magenta().bold())
+                        .push_unstyled(">")
+                        .push_unstyled(input),
+                );
+                ui_sender
+                    .send(msg)
+                    .map_err(|_| eyre!("could not send to closed ui msg channel"))?;
+            }
+
+            Ok(())
         }
     }
 }
