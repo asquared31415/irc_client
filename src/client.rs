@@ -15,7 +15,7 @@ use std::{
 
 use crossterm::style::Stylize;
 use eyre::{bail, eyre, Context};
-use log::error;
+use log::{debug, error};
 use rustls::{pki_types::ServerName, ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use thiserror::Error;
 
@@ -246,15 +246,8 @@ pub fn start(
         };
 
         let state = &mut *state.lock().unwrap();
-        match state.recv_msg(msg) {
-            Ok(()) => {}
-            Err(report) => {
-                let _ = state
-                    .ui
-                    .error(format!("unable to handle message: {}", report));
-                QUIT_REQUESTED.store(true, atomic::Ordering::Relaxed);
-            }
-        }
+        msg.handle(state)?;
+        debug!("state after handling {:#?}", state.conn_state);
     }
 }
 
