@@ -11,7 +11,7 @@ use crossterm::{
 use log::trace;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::ui::layout::Rect;
+use crate::{ui::layout::Rect, util::unicode_width};
 
 #[derive(Default, Debug)]
 pub struct Line<'a> {
@@ -124,7 +124,8 @@ impl<'a> Line<'a> {
                         width,
                         remaining_width
                     );
-                    let len = word.graphemes(true).count() as u16;
+
+                    let len = unicode_width::display_width(word) as u16;
                     if len <= *remaining_width {
                         trace!("word on same line");
                         lines
@@ -136,9 +137,9 @@ impl<'a> Line<'a> {
                         // this word will never fit on one line!
                         trace!("word would NEVER fit: {:?}/{}", word, width);
                         // split the graphemes at the end of the line
-                        let (this_line, next) = word.graphemes(true).partition::<String, _>(|_| {
+                        let (this_line, next) = word.graphemes(true).partition::<String, _>(|g| {
                             if *remaining_width > 0 {
-                                *remaining_width -= 1;
+                                *remaining_width -= unicode_width::display_width(g) as u16;
                                 true
                             } else {
                                 false

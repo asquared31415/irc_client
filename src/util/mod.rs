@@ -1,3 +1,5 @@
+pub mod unicode_width;
+
 use core::fmt::Display;
 
 use crate::constants::names::{

@@ -61,6 +61,7 @@ impl InputBuffer {
         self.buffer.as_str()
     }
 
+    // TODO: this is likely slightly incorrect in the face of different widths for graphemes
     pub fn get_visible_area(&self, width: u16) -> (&str, usize) {
         // we cannot meaningfully lay out any real text in 0 width, and really the cursor doesn't
         // fit at position 0 either
