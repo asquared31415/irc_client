@@ -1,12 +1,13 @@
 use core::sync::atomic;
 use std::sync::mpsc::Sender;
 
-use eyre::eyre;
+use eyre::{bail, eyre};
+use log::debug;
 use thiserror::Error;
 
 use crate::{
     irc_message::{IRCMessage, Message},
-    state::{ClientState, ConnectionState},
+    state::{ClientState, ConnectedState, ConnectionState},
 };
 
 macro_rules! expect_connected_state {
@@ -79,8 +80,11 @@ impl Command {
     pub fn handle(&self, state: &mut ClientState, sender: &Sender<IRCMessage>) -> eyre::Result<()> {
         match self {
             Command::Join(channel) => {
-                // don't need to access the state here, just need to ensure connected
-                let _ = expect_connected_state!(state, "JOIN")?;
+                let ConnectedState { channels, .. } = expect_connected_state!(state, "JOIN")?;
+
+                if channels.len() > 0 {
+                    bail!("cannot JOIN more than one channel (NYI)");
+                }
 
                 sender.send(IRCMessage {
                     tags: None,
