@@ -124,17 +124,26 @@ impl<'a> Line<'a> {
                         width,
                         remaining_width
                     );
-                    if word.len() <= usize::from(*remaining_width) {
+                    let len = word.graphemes(true).count() as u16;
+                    if len <= *remaining_width {
                         trace!("word on same line");
                         lines
                             .last_mut()
                             .unwrap()
                             .push(StyledContent::new(style, word.to_string()));
-                        *remaining_width -= word.len() as u16;
-                    } else if word.len() >= usize::from(width) {
+                        *remaining_width -= len;
+                    } else if len >= width {
                         // this word will never fit on one line!
                         trace!("word would NEVER fit: {:?}/{}", word, width);
-                        let (this_line, next) = word.split_at(usize::from(*remaining_width));
+                        // split the graphemes at the end of the line
+                        let (this_line, next) = word.graphemes(true).partition::<String, _>(|_| {
+                            if *remaining_width > 0 {
+                                *remaining_width -= 1;
+                                true
+                            } else {
+                                false
+                            }
+                        });
                         lines
                             .last_mut()
                             .unwrap()
@@ -142,13 +151,13 @@ impl<'a> Line<'a> {
                         // wrap
                         lines.push(vec![]);
                         *remaining_width = width;
-                        handle_word(lines, width, remaining_width, next, style);
+                        handle_word(lines, width, remaining_width, next.as_str(), style);
                     } else {
                         trace!("word on next line");
                         // if a word can't fit in the remaining space, but would be fine on the
                         // next line, wrap
                         lines.push(vec![StyledContent::new(style, word.to_string())]);
-                        *remaining_width = width - (word.len() as u16);
+                        *remaining_width = width - len;
                     }
                 }
 

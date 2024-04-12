@@ -72,10 +72,10 @@ impl InputBuffer {
         // if the cursor is at least width/2 characters from either end of the string, it will
         // be exactly in the middle.
 
-        debug!("buffer {:?}", self.buffer);
+        trace!("buffer {:?}", self.buffer);
         let graphemes = self.buffer.grapheme_indices(true);
         let (before, after) = graphemes.partition::<Vec<_>, _>(|(idx, _)| *idx < self.cursor_idx);
-        debug!("before: {:#?}, after {:#?}", before, after);
+        trace!("before: {:#?}, after {:#?}", before, after);
 
         let width = usize::from(width);
         let half_width = width / 2;
@@ -131,7 +131,7 @@ impl InputBuffer {
             }
         };
 
-        debug!(
+        trace!(
             "buf.len {} range {:?} cursor_pos {}",
             self.buffer.len(),
             range,

@@ -15,7 +15,7 @@ use std::{
 
 use crossterm::style::Stylize as _;
 use eyre::{bail, eyre, Context};
-use log::{debug, error};
+use log::*;
 use rustls::{pki_types::ServerName, ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use thiserror::Error;
 
@@ -119,7 +119,6 @@ pub fn start(
                     // write any necessary messages
                     match write_receiver.try_recv() {
                         Ok(msg) => {
-                            // debug!("write msg {:#?}", msg);
                             connection.write(&msg)?;
                         }
                         // if empty, move on to try to read
@@ -247,7 +246,7 @@ pub fn start(
 
         let state = &mut *state.lock().unwrap();
         msg.handle(state)?;
-        debug!("state after handling {:#?}", state.conn_state);
+        trace!("state after handling {:#?}", state.conn_state);
     }
 }
 
