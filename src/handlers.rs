@@ -775,7 +775,6 @@ impl IRCMessage {
             }
         }
 
-        state.messages.push(self.clone());
         Ok(())
     }
 }

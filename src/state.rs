@@ -10,7 +10,6 @@ use crate::{
 
 pub struct ClientState<'a> {
     pub ui: TerminalUi<'a>,
-    pub messages: Vec<IRCMessage>,
     pub target_messages: HashMap<Target, Vec<IRCMessage>>,
     pub conn_state: ConnectionState,
     pub msg_sender: Sender<IRCMessage>,
@@ -26,7 +25,6 @@ impl<'a> ClientState<'a> {
     ) -> Self {
         Self {
             ui,
-            messages: Vec::new(),
             target_messages: HashMap::new(),
             conn_state: ConnectionState::Registration(RegistrationState { requested_nick }),
             msg_sender,
@@ -39,7 +37,6 @@ impl<'a> fmt::Debug for ClientState<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if f.alternate() {
             f.debug_struct("ClientState")
-                .field("messages", &self.messages)
                 .field("target_messages", &self.target_messages)
                 .field("conn_state", &self.conn_state)
                 .finish_non_exhaustive()
