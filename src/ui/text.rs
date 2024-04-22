@@ -19,6 +19,16 @@ pub struct Line<'a> {
 }
 
 impl<'a> Line<'a> {
+    pub fn warn(msg: impl ToString) -> Self {
+        let content = msg.to_string().replace(['\r', '\n'], "");
+        Self {
+            content: vec![DynStyledContentWrapper {
+                style: ContentStyle::default(),
+                content: Box::new(content),
+            }],
+        }
+    }
+
     pub fn new_without_style<S: AsRef<str>>(s: S) -> Option<Line<'a>> {
         let content = s.as_ref().to_string();
         if !content.contains('\n') {

@@ -27,7 +27,7 @@ use crate::{
     state::{ClientState, ConnectedState, ConnectionState},
     ui::{
         layout::{Direction, Layout, Section, SectionKind},
-        term::{InputStatus, TerminalUi, UiMsg},
+        term::{InputStatus, TerminalUi},
         text::Line,
     },
     util::Target,
@@ -83,7 +83,9 @@ pub fn start(
     // recv from this channel to get incoming messages from the server
     let (msg_sender, msg_receiver) = mpsc::channel::<IRCMessage>();
 
-    let (ui_sender, ui_receiver) = mpsc::channel::<UiMsg>();
+    // write to this channel to cause the ui to re-render
+    // this is used when messages arrive or user input is handled.
+    let (render_send, render_recv) = mpsc::channel::<()>();
 
     let layout = Layout {
         direction: Direction::Vertical,
@@ -96,12 +98,14 @@ pub fn start(
             },
         ],
     };
-    let state = Arc::new(Mutex::new(ClientState::new(
+    let mut state = ClientState::new(
         write_sender.clone(),
-        ui_sender.clone(),
         TerminalUi::new(layout, io::stdout())?,
         nick.to_string(),
-    )));
+    );
+    // draw the status page immediately
+    state.render()?;
+    let state = Arc::new(Mutex::new(state));
 
     // stream reader and writer thread
     // moves the stream into the thread
@@ -167,15 +171,15 @@ pub fn start(
                     let ret = match state.ui.input() {
                         InputStatus::Complete(input) => {
                             // on complete, need to re-render to clear msg
-                            ui_sender.send(UiMsg::ReRender);
-                            handle_input(state, &queue_sender, &ui_sender, input.trim_start())
+                            render_send.send(());
+                            handle_input(state, &queue_sender, input.trim_start())
                         }
                         // incomplete input, loop again
                         InputStatus::Incomplete { rerender } => {
                             // some incomplete messages affect the cursor or input buffer state,
                             // re-render for those
                             if rerender {
-                                ui_sender.send(UiMsg::ReRender);
+                                render_send.send(());
                             }
                             Ok(())
                         }
@@ -213,8 +217,11 @@ pub fn start(
         move || {
             loop {
                 let res = (|| -> eyre::Result<()> {
-                    match ui_receiver.recv() {
-                        Ok(msg) => state.lock().unwrap().ui.handle_msg(msg),
+                    match render_recv.recv() {
+                        Ok(_) => {
+                            state.lock().unwrap().render()?;
+                            Ok(())
+                        }
                         Err(_) => bail!("ui message channel closed"),
                     }
                 })();
@@ -262,7 +269,6 @@ enum InputErr {
 fn handle_input(
     state: &mut ClientState,
     sender: &Sender<IRCMessage>,
-    ui_sender: &Sender<UiMsg>,
     input: &str,
 ) -> Result<(), InputErr> {
     // ui.debug(format!("input: {}", input))?;
@@ -273,14 +279,14 @@ fn handle_input(
                 match cmd.handle(state, sender) {
                     Ok(()) => {}
                     Err(report) => {
-                        ui_sender.send(UiMsg::Error(report.to_string()));
+                        state.error(report.to_string());
                     }
                 }
                 // even if the command cannot be handled, that's not a fatal error
                 Ok(())
             }
             Err(e) => {
-                ui_sender.send(UiMsg::Error(format!("failed to parse command: {}", e)));
+                state.error(format!("failed to parse command: {}", e));
                 // failure to parse is never fatal
                 Ok(())
             }
@@ -289,43 +295,39 @@ fn handle_input(
             let ConnectionState::Connected(ConnectedState { nick, channels, .. }) =
                 &mut state.conn_state
             else {
-                state.ui_sender.send(UiMsg::Error(String::from(
-                    "cannot send message when not registered",
-                )));
+                state.error(String::from("cannot send message when not registered"));
                 // this is not a fatal error, it likely means that the connection was slow
                 return Ok(());
             };
+            let nick = nick.clone();
 
             if channels.len() == 0 {
-                ui_sender.send(UiMsg::Warn(String::from(
-                    "cannot send a message to 0 channels",
-                )));
+                state.error(String::from("cannot send a message to 0 channels"));
             } else if channels.len() > 1 {
-                ui_sender.send(UiMsg::Warn(String::from("multiple channels NYI")));
+                state.error(String::from("multiple channels NYI"));
             } else {
+                let targets = channels
+                    .iter()
+                    .map(|(_, c)| Target::Channel(c.name().to_string()))
+                    .collect::<Vec<_>>();
+                for target in targets.iter() {
+                    let line = Line::default()
+                        .push_unstyled("<")
+                        .push(nick.to_string().magenta().bold())
+                        .push_unstyled(">")
+                        .push_unstyled(input);
+                    state.add_line(target.clone(), line);
+                }
                 sender
                     .send(IRCMessage {
                         tags: None,
                         source: None,
                         message: Message::Privmsg {
-                            targets: channels
-                                .iter()
-                                .map(|c| Target::Channel(c.name().to_string()))
-                                .collect(),
+                            targets,
                             msg: input.to_string(),
                         },
                     })
                     .wrap_err("failed to send privmsg to writer thread")?;
-                let msg = UiMsg::Writeln(
-                    Line::default()
-                        .push_unstyled("<")
-                        .push(nick.to_string().magenta().bold())
-                        .push_unstyled(">")
-                        .push_unstyled(input),
-                );
-                ui_sender
-                    .send(msg)
-                    .map_err(|_| eyre!("could not send to closed ui msg channel"))?;
             }
 
             Ok(())

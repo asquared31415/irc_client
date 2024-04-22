@@ -2,12 +2,14 @@ use core::sync::atomic;
 use std::sync::mpsc::Sender;
 
 use eyre::{bail, eyre};
-use log::debug;
+use log::*;
 use thiserror::Error;
 
 use crate::{
+    channel::channel::Channel,
     irc_message::{IRCMessage, Message},
     state::{ClientState, ConnectedState, ConnectionState},
+    util::Target,
 };
 
 macro_rules! expect_connected_state {
@@ -86,11 +88,16 @@ impl Command {
                     bail!("cannot JOIN more than one channel (NYI)");
                 }
 
+                let target = Target::new(channel.to_string())
+                    .ok_or_else(|| eyre!("join was invalid channel {:?}", channel))?;
+
                 sender.send(IRCMessage {
                     tags: None,
                     source: None,
                     message: Message::Join(vec![(channel.to_string(), None)]),
                 })?;
+
+                state.join_channel(Channel::from_target(&target)?);
             }
             Command::Raw(text) => {
                 // don't need to access the state here, just need to ensure connected

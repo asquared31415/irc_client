@@ -1,6 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 use thiserror::Error;
+
+use crate::{ui::text::Line, util::Target};
 
 #[derive(Debug, Error)]
 pub enum ChannelCreationErr {
@@ -21,6 +23,7 @@ pub struct Channel {
     topic: String,
     // TODO: represent users better, may need to be `HashSet<Arc<User>>`?
     pub users: HashSet<String>,
+    pub messages: VecDeque<Line<'static>>,
 }
 
 impl Channel {
@@ -42,11 +45,20 @@ impl Channel {
             modes: String::new(),
             topic: String::new(),
             users: HashSet::new(),
+            messages: VecDeque::new(),
         })
+    }
+
+    pub fn from_target(target: &Target) -> Result<Self, ChannelCreationErr> {
+        Self::new(target.as_str())
     }
 
     pub fn name(&self) -> &str {
         self.name.as_str()
+    }
+
+    pub fn target(&self) -> Target {
+        Target::Channel(self.name.clone())
     }
 }
 

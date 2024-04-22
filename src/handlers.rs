@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crossterm::style::Stylize as _;
 use eyre::{bail, eyre};
 use log::*;
@@ -7,10 +5,8 @@ use log::*;
 use crate::{
     channel::channel::Channel,
     irc_message::{IRCMessage, Message, Param, Source},
-    state::{
-        ClientState, ConnectedState, ConnectionState, MessagesState, NamesState, RegistrationState,
-    },
-    ui::{term::UiMsg, text::Line},
+    state::{ClientState, ConnectedState, ConnectionState, NamesState, RegistrationState},
+    ui::text::Line,
     util::Target,
 };
 
@@ -24,25 +20,23 @@ macro_rules! expect_connected_state {
 }
 
 impl IRCMessage {
+    fn unhandled(&self, state: &mut ClientState) {
+        state.warn(format!("unhandled msg {:?}", self));
+    }
+
     // FIXME: remove this
     #[allow(unused_must_use)]
     pub fn handle(&self, state: &mut ClientState) -> eyre::Result<()> {
         use crate::constants::numerics::*;
         match &self.message {
             Message::Cap => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(format!("unhandled msg {:?}", self)));
+                self.unhandled(state);
             }
             Message::Authenticate => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(format!("unhandled msg {:?}", self)));
+                self.unhandled(state);
             }
             Message::Nick(_) => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(format!("unhandled msg {:?}", self)));
+                self.unhandled(state);
             }
             Message::Ping(token) => {
                 state.msg_sender.send(IRCMessage {
@@ -57,21 +51,17 @@ impl IRCMessage {
                 };
                 // NOTE: servers SHOULD always send a reason, but make sure
                 let reason = reason.as_deref().unwrap_or("disconnected");
-                state.ui_sender.send(UiMsg::Writeln(
+                state.add_line(
+                    Target::Status,
                     Line::default()
                         .push(name.magenta())
                         .push_unstyled(" quit: ")
                         .push_unstyled(reason),
-                ));
-                state
-                    .target_messages
-                    .entry(Target::Status)
-                    .or_default()
-                    .push(self.clone());
+                );
             }
             Message::Join(join_channels) => {
                 let ClientState {
-                    conn_state: ConnectionState::Connected(ConnectedState { nick, channels, .. }),
+                    conn_state: ConnectionState::Connected(ConnectedState { .. }),
                     ..
                 } = state
                 else {
@@ -82,41 +72,24 @@ impl IRCMessage {
                 // otherwise announce a join
                 match self.source.as_ref().map(|source| source.get_name()) {
                     Some(join_nick) => {
-                        let join_channels = join_channels.iter().filter_map(|(channel, _)| {
-                            if let Some(channel @ Target::Channel(_)) = Target::new(channel) {
-                                Some(channel)
-                            } else {
-                                None
-                            }
-                        });
-                        for channel in join_channels {
-                            state.ui_sender.send(UiMsg::Writeln(
-                                Line::default()
-                                    .push(join_nick.magenta())
-                                    .push(" joined ".green())
-                                    .push(channel.as_str().dark_blue()),
-                            ));
+                        let join_channels = join_channels
+                            .iter()
+                            .filter_map(|(channel, _)| Channel::new(channel).ok())
+                            .collect::<Vec<_>>();
 
-                            // if we were the ones joining the channel, track that
-                            if join_nick == nick {
-                                channels.push(Channel::new(channel.as_str())?);
-                            }
+                        for channel in join_channels.into_iter() {
+                            let line = Line::default()
+                                .push(join_nick.magenta())
+                                .push(" joined ".green())
+                                .push(channel.name().dark_blue());
 
-                            state
-                                .target_messages
-                                .entry(channel)
-                                .or_default()
-                                .push(self.clone());
+                            state.add_line(channel.target(), line);
                         }
                     }
                     None => {
-                        state
-                            .ui_sender
-                            .send(UiMsg::Warn(String::from("JOIN msg without a source")));
+                        state.warn(String::from("JOIN msg without a source"));
                     }
                 }
-
-                debug!("{:#?}", channels);
             }
             Message::Part(channels, reason) => {
                 let Some(name) = self.source.as_ref().map(Source::get_name) else {
@@ -138,30 +111,18 @@ impl IRCMessage {
                         line = line.push_unstyled(format!(": {}", reason));
                     }
 
-                    state.ui_sender.send(UiMsg::Writeln(line));
-                    state
-                        .target_messages
-                        .entry(channel)
-                        .or_default()
-                        .push(self.clone());
+                    state.add_line(channel, line);
                 }
             }
             Message::Invite { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(format!("unhandled msg {:?}", self)));
+                self.unhandled(state);
             }
             Message::Kick { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(format!("unhandled msg {:?}", self)));
+                self.unhandled(state);
             }
             Message::Mode { target, mode } => {
                 let Some(mode) = mode else {
-                    state.ui_sender.send(UiMsg::Warn(format!(
-                        "server sent MODE for {} without modestr",
-                        target
-                    )));
+                    state.warn(format!("server sent MODE for {} without modestr", target));
                     return Ok(());
                 };
 
@@ -170,86 +131,61 @@ impl IRCMessage {
                     ..
                 } = state
                 else {
-                    state.ui_sender.send(UiMsg::Warn(String::from(
-                        "must be connected to handle MODE",
-                    )));
+                    state.warn(String::from("must be connected to handle MODE"));
                     return Ok(());
                 };
 
                 match target {
                     Target::Channel(channel_name) => {
-                        let Some(channel) = channels.iter_mut().find(|c| c.name() == channel_name)
-                        else {
-                            state.ui_sender.send(UiMsg::Warn(format!(
+                        let Some(channel) = channels.get_mut(target) else {
+                            state.warn(format!(
                                 "unexpected MODE for not joined channel {}",
                                 channel_name
-                            )));
+                            ));
                             return Ok(());
                         };
 
                         channel.modes = mode.to_string();
 
-                        state
-                            .target_messages
-                            .entry(Target::Channel(channel_name.clone()))
-                            .or_default()
-                            .push(self.clone());
+                        // TODO: mode messages
                     }
                     Target::Nickname(_) => {
-                        state
-                            .ui_sender
-                            .send(UiMsg::Warn(String::from("MODE for nicknames NYI")));
+                        state.warn(String::from("MODE for nicknames NYI"));
                     }
                     _ => {
-                        state.ui_sender.send(UiMsg::Warn(String::from(
-                            "could not determine target for MODE",
-                        )));
+                        state.warn(String::from("could not determine target for MODE"));
                     }
                 }
             }
             Message::Privmsg { targets, msg } => {
-                let mut line = if let Some(source) = self.source.as_ref() {
-                    create_nick_line(source.get_name(), false)
-                } else {
-                    Line::default()
-                };
-                line.extend(Line::default().push_unstyled(msg).into_iter());
-                state.ui_sender.send(UiMsg::Writeln(line));
-
                 for target in targets {
-                    state
-                        .target_messages
-                        .entry(target.clone())
-                        .or_default()
-                        .push(self.clone());
+                    let mut line = if let Some(source) = self.source.as_ref() {
+                        create_nick_line(source.get_name(), false)
+                    } else {
+                        Line::default()
+                    };
+                    line.extend(Line::default().push_unstyled(msg).into_iter());
+                    state.add_line(target.clone(), line);
                 }
             }
             Message::Notice { targets, msg } => {
-                let mut line = if let Some(source) = self.source.as_ref() {
-                    create_nick_line(source.get_name(), false)
-                } else {
-                    Line::default()
-                };
-                line.extend(
-                    Line::default()
-                        .push("NOTICE ".green())
-                        .push_unstyled(msg)
-                        .into_iter(),
-                );
-                state.ui_sender.send(UiMsg::Writeln(line));
-
                 for target in targets {
-                    state
-                        .target_messages
-                        .entry(target.clone())
-                        .or_default()
-                        .push(self.clone());
+                    let mut line = if let Some(source) = self.source.as_ref() {
+                        create_nick_line(source.get_name(), false)
+                    } else {
+                        Line::default()
+                    };
+                    line.extend(
+                        Line::default()
+                            .push("NOTICE ".green())
+                            .push_unstyled(msg)
+                            .into_iter(),
+                    );
+                    state.add_line(target.clone(), line);
                 }
             }
             Message::Kill { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(format!("unhandled msg {:?}", self)));
+                self.unhandled(state);
             }
 
             // =========================================
@@ -270,11 +206,10 @@ impl IRCMessage {
                     ..
                 } = state
                 else {
-                    state
-                        .ui_sender
-                        .send(UiMsg::Warn(String::from("001 when already registered")));
+                    state.warn(String::from("RPL_WELCOME when already registered"));
                     return Ok(());
                 };
+                let requested_nick = requested_nick.clone();
 
                 let [nick, text, ..] = args.as_slice() else {
                     bail!("RPL_001 had no nick and msg arg");
@@ -284,27 +219,15 @@ impl IRCMessage {
                 };
 
                 if requested_nick != nick {
-                    state.ui_sender.send(UiMsg::Warn(format!(
+                    state.warn(format!(
                         "WARNING: requested nick {}, but got nick {}",
                         requested_nick, nick
-                    )));
+                    ));
                 }
 
-                state.conn_state = ConnectionState::Connected(ConnectedState {
-                    nick: nick.to_string(),
-                    channels: Vec::new(),
-                    messages_state: MessagesState {
-                        active_names: HashMap::new(),
-                    },
-                });
-                state
-                    .ui_sender
-                    .send(UiMsg::Writeln(Line::from(text.to_string())));
-                state
-                    .target_messages
-                    .entry(Target::Status)
-                    .or_default()
-                    .push(self.clone());
+                state.conn_state =
+                    ConnectionState::Connected(ConnectedState::new(nick.to_string()));
+                state.add_line(Target::Status, Line::from(text.to_string()));
             }
 
             Message::Numeric {
@@ -317,14 +240,7 @@ impl IRCMessage {
                 let Some(text) = text.as_str() else {
                     bail!("RPL_YOURHOST msg not a string");
                 };
-                state
-                    .ui_sender
-                    .send(UiMsg::Writeln(Line::from(text.to_string())));
-                state
-                    .target_messages
-                    .entry(Target::Status)
-                    .or_default()
-                    .push(self.clone());
+                state.add_line(Target::Status, Line::from(text.to_string()));
             }
             Message::Numeric {
                 num: RPL_CREATED,
@@ -336,14 +252,7 @@ impl IRCMessage {
                 let Some(text) = text.as_str() else {
                     bail!("RPL_CREATED msg not a string");
                 };
-                state
-                    .ui_sender
-                    .send(UiMsg::Writeln(Line::from(text.to_string())));
-                state
-                    .target_messages
-                    .entry(Target::Status)
-                    .or_default()
-                    .push(self.clone());
+                state.add_line(Target::Status, Line::from(text.to_string()));
             }
             Message::Numeric {
                 num: RPL_MYINFO,
@@ -357,23 +266,13 @@ impl IRCMessage {
                     .filter_map(Param::as_str)
                     .collect::<Vec<&str>>()
                     .join(" ");
-                state.ui_sender.send(UiMsg::Writeln(Line::from(text)));
-                state
-                    .target_messages
-                    .entry(Target::Status)
-                    .or_default()
-                    .push(self.clone());
+                state.add_line(Target::Status, Line::from(text));
             }
             Message::Numeric {
                 num: RPL_ISUPPORT,
                 args: _,
             } => {
                 //TODO: do we care about this?
-                state
-                    .target_messages
-                    .entry(Target::Status)
-                    .or_default()
-                    .push(self.clone());
             }
 
             Message::Numeric {
@@ -381,9 +280,7 @@ impl IRCMessage {
                 args,
             } => {
                 if let Some(msg) = args.last().and_then(|p| p.as_str()) {
-                    state
-                        .ui_sender
-                        .send(UiMsg::Writeln(Line::from(msg.to_string())));
+                    state.add_line(Target::Status, Line::from(msg.to_string()));
                 }
             }
             Message::Numeric {
@@ -395,18 +292,14 @@ impl IRCMessage {
                     return Ok(());
                 };
                 let Some(ops): Option<u16> = ops.as_str().and_then(|s| s.parse().ok()) else {
-                    state
-                        .ui_sender
-                        .send(UiMsg::Warn(String::from("RPL_USEROP was not a u16")));
+                    state.warn(String::from("RPL_USEROP was not a u16"));
                     return Ok(());
                 };
                 let Some(msg) = msg.as_str() else {
                     return Ok(());
                 };
 
-                state
-                    .ui_sender
-                    .send(UiMsg::Writeln(Line::from(format!("{} {}", ops, msg))));
+                state.add_line(Target::Status, Line::from(format!("{} {}", ops, msg)));
             }
             Message::Numeric {
                 num: RPL_LUSERUNKNOWN,
@@ -418,19 +311,17 @@ impl IRCMessage {
                 };
                 let Some(connections): Option<u16> = ops.as_str().and_then(|s| s.parse().ok())
                 else {
-                    state
-                        .ui_sender
-                        .send(UiMsg::Warn(String::from("RPL_LUSERUNKNOWN was not a u16")));
+                    state.warn(String::from("RPL_LUSERUNKNOWN was not a u16"));
                     return Ok(());
                 };
                 let Some(msg) = msg.as_str() else {
                     return Ok(());
                 };
 
-                state.ui_sender.send(UiMsg::Writeln(Line::from(format!(
-                    "{} {}",
-                    connections, msg
-                ))));
+                state.add_line(
+                    Target::Status,
+                    Line::from(format!("{} {}", connections, msg)),
+                );
             }
             Message::Numeric {
                 num: RPL_LUSERCHANNELS,
@@ -441,27 +332,21 @@ impl IRCMessage {
                     return Ok(());
                 };
                 let Some(channels): Option<u16> = ops.as_str().and_then(|s| s.parse().ok()) else {
-                    state
-                        .ui_sender
-                        .send(UiMsg::Warn(String::from("RPL_LUSERCHANNELS was not a u16")));
+                    state.warn(String::from("RPL_LUSERCHANNELS was not a u16"));
                     return Ok(());
                 };
                 let Some(msg) = msg.as_str() else {
                     return Ok(());
                 };
 
-                state
-                    .ui_sender
-                    .send(UiMsg::Writeln(Line::from(format!("{} {}", channels, msg))));
+                state.add_line(Target::Status, Line::from(format!("{} {}", channels, msg)));
             }
             Message::Numeric {
                 num: RPL_LUSERME,
                 args,
             } => {
                 if let Some(msg) = args.last().and_then(|p| p.as_str()) {
-                    state
-                        .ui_sender
-                        .send(UiMsg::Writeln(Line::from(msg.to_string())));
+                    state.add_line(Target::Status, Line::from(msg.to_string()));
                 }
             }
             Message::Numeric {
@@ -469,9 +354,7 @@ impl IRCMessage {
                 args,
             } => {
                 if let Some(msg) = args.last().and_then(|p| p.as_str()) {
-                    state
-                        .ui_sender
-                        .send(UiMsg::Writeln(Line::from(msg.to_string())));
+                    state.add_line(Target::Status, Line::from(msg.to_string()));
                 }
             }
             Message::Numeric {
@@ -479,9 +362,7 @@ impl IRCMessage {
                 args,
             } => {
                 if let Some(msg) = args.last().and_then(|p| p.as_str()) {
-                    state
-                        .ui_sender
-                        .send(UiMsg::Writeln(Line::from(msg.to_string())));
+                    state.add_line(Target::Status, Line::from(msg.to_string()));
                 }
             }
 
@@ -492,7 +373,8 @@ impl IRCMessage {
                 num: ERR_NOMOTD,
                 args,
             } => {
-                state.ui_sender.send(UiMsg::Writeln(
+                state.add_line(
+                    Target::Status,
                     Line::default().push(
                         format!(
                             "no MOTD: {}",
@@ -500,7 +382,7 @@ impl IRCMessage {
                         )
                         .yellow(),
                     ),
-                ));
+                );
             }
 
             Message::Numeric {
@@ -509,9 +391,7 @@ impl IRCMessage {
             } => {
                 // display the MOTD to the user
                 if let Some(msg) = args.last().and_then(|p| p.as_str()) {
-                    state
-                        .ui_sender
-                        .send(UiMsg::Writeln(Line::from(msg.to_string())));
+                    state.add_line(Target::Status, Line::from(msg.to_string()));
                 }
             }
 
@@ -525,15 +405,11 @@ impl IRCMessage {
                 let ConnectedState { messages_state, .. } = expect_connected_state!(state, self)?;
 
                 let [_, _, channel, names_list @ ..] = args.as_slice() else {
-                    state
-                        .ui_sender
-                        .send(UiMsg::Warn(String::from("RPL_NAMREPLY missing params")));
+                    state.warn(String::from("RPL_NAMREPLY missing params"));
                     return Ok(());
                 };
                 let Some(channel) = channel.as_str() else {
-                    state
-                        .ui_sender
-                        .send(UiMsg::Warn(String::from("RPL_NAMEREPLY malformed args")));
+                    state.warn(String::from("RPL_NAMREPLY malformed params"));
                     return Ok(());
                 };
 
@@ -557,48 +433,46 @@ impl IRCMessage {
                     ..
                 } = expect_connected_state!(state, self)?;
                 let [_, channel, ..] = args.as_slice() else {
-                    state
-                        .ui_sender
-                        .send(UiMsg::Warn(String::from("RPL_ENDOFNAMES missing args")));
+                    state.warn(String::from("RPL_ENDOFNAMES missing args"));
                     return Ok(());
                 };
                 let Some(channel_name) = channel.as_str() else {
-                    state
-                        .ui_sender
-                        .send(UiMsg::Warn(String::from("RPL_ENDOFNAMES malformed args")));
+                    state.warn(String::from("RPL_ENDOFNAMES malformed args"));
+                    return Ok(());
+                };
+
+                let Some(target) = Target::new(channel_name) else {
+                    state.warn(format!("RPL_ENDOFNAMES invalid channel {:?}", channel_name));
                     return Ok(());
                 };
 
                 let Some(NamesState { names }) = messages_state.active_names.remove(channel_name)
                 else {
-                    state.ui_sender.send(UiMsg::Warn(format!(
-                        "unexpected RPL_NAMEREPLY for {}",
+                    state.warn(format!(
+                        "did not expect a RPL_ENDOFNAMES for {}",
                         channel_name
-                    )));
+                    ));
                     return Ok(());
                 };
 
-                let Some(channel) = channels.iter_mut().find(|c| c.name() == channel_name) else {
-                    state.ui_sender.send(UiMsg::Warn(format!(
+                let Some(channel) = channels.get_mut(&target) else {
+                    state.warn(format!(
                         "cannot update names for channel not joined: {}",
                         channel_name
-                    )));
+                    ));
                     return Ok(());
                 };
 
                 channel.users.extend(names.iter().cloned());
-                debug!("{:#?}", channel);
 
-                state.ui_sender.send(UiMsg::Writeln(
+                state.add_line(
+                    target.clone(),
                     Line::default()
                         .push("NAMES".green())
                         .push_unstyled(" for ")
                         .push(channel_name.blue()),
-                ));
-                state.ui_sender.send(UiMsg::Writeln(Line::from(format!(
-                    " - {}",
-                    names.join(" ")
-                ))));
+                );
+                state.add_line(target, Line::from(format!(" - {}", names.join(" "))));
             }
 
             // =======================
@@ -607,9 +481,7 @@ impl IRCMessage {
             Message::Numeric {
                 num: RPL_UMODEIS, ..
             } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("TODO: RPL_UMODEIS")));
+                state.warn(String::from("TODO: RPL_UMODEIS"));
             }
 
             // =========================================
@@ -622,15 +494,11 @@ impl IRCMessage {
             // =========================================
             // =========================================
             Message::Numeric { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(format!("unhandled msg {:?}", self)));
+                self.unhandled(state);
             }
 
             Message::Unknown { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(format!("unhandled unknown msg {:?}", self)));
+                state.warn(format!("unhandled unknown msg {:?}", self));
             }
 
             // fatal error, the connection will be terminated
@@ -648,130 +516,82 @@ impl IRCMessage {
             // ==============================================
             // ==============================================
             Message::Pass { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received PASS")));
+                state.warn(String::from("client received PASS"));
             }
             Message::User { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received USER")));
+                state.warn(String::from("client received USER"));
             }
             Message::Pong { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received PONG")));
+                state.warn(String::from("client received PONG"));
             }
             Message::Oper => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received OPER")));
+                state.warn(String::from("client received OPER"));
             }
             Message::Topic { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received TOPIC")));
+                state.warn(String::from("client received TOPIC"));
             }
             Message::Names { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received NAMES")));
+                state.warn(String::from("client received NAMES"));
             }
             Message::List => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received LIST")));
+                state.warn(String::from("client received LIST"));
             }
             Message::Motd { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received MOTD")));
+                state.warn(String::from("client received MOTD"));
             }
             Message::Version { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received VERSION")));
+                state.warn(String::from("client received VERSION"));
             }
 
             Message::Admin { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received ADMIN")));
+                state.warn(String::from("client received ADMIN"));
             }
             Message::Connect { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received CONNECT")));
+                state.warn(String::from("client received CONNECT"));
             }
             Message::Lusers => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received LUSERS")));
+                state.warn(String::from("client received LUSERS"));
             }
             Message::Time { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received TIME")));
+                state.warn(String::from("client received TIME"));
             }
             Message::Stats { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received STATS")));
+                state.warn(String::from("client received STATS"));
             }
             Message::Help { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received HELP")));
+                state.warn(String::from("client received HELP"));
             }
             Message::Info => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received INFO")));
+                state.warn(String::from("client received INFO"));
             }
             Message::Who { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received WHO")));
+                state.warn(String::from("client received WHO"));
             }
             Message::Whois { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received WHOIS")));
+                state.warn(String::from("client received WHOIS"));
             }
             Message::WhoWas { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received WHOWAS")));
+                state.warn(String::from("client received WHOWAS"));
             }
             Message::Rehash => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received REHASH")));
+                state.warn(String::from("client received REHASH"));
             }
             Message::Restart => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received RESTART")));
+                state.warn(String::from("client received RESTART"));
             }
             Message::SQuit { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received SQUIT")));
+                state.warn(String::from("client received SQUIT"));
             }
             Message::Away { .. } => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received AWAY")));
+                state.warn(String::from("client received AWAY"));
             }
             Message::Links => {
-                state
-                    .ui_sender
-                    .send(UiMsg::Warn(String::from("client received LINKS")));
+                state.warn(String::from("client received LINKS"));
             }
             Message::Raw { .. } => {
-                state.ui_sender.send(UiMsg::Warn(String::from(
+                state.warn(String::from(
                     "client received RAW (????? this should genuinely be unreachable?!)",
-                )));
+                ));
             }
         }
 

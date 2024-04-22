@@ -54,26 +54,6 @@ pub struct IRCMessage {
     pub message: Message,
 }
 
-#[derive(Debug, Error)]
-pub enum IrcParseErr {
-    #[error("message contains interior CRLF")]
-    InteriorCRLF,
-    #[error("message is missing a command")]
-    MissingCommand,
-    #[error(transparent)]
-    MessageParseErr(#[from] MessageParseErr),
-}
-
-#[derive(Debug, Error)]
-pub enum MessageToStringErr {
-    #[error("clients may not create a {} message", .0)]
-    ClientMayNotCreate(String),
-    #[error("clients must not send a source with their messages")]
-    ClientMustNotSendSource,
-    #[error("message had invalid params")]
-    InvalidParams,
-}
-
 impl IRCMessage {
     /// parses a message from a string. the string must contain only a single message. the string
     /// must not contain CRLF.
@@ -136,6 +116,26 @@ impl IRCMessage {
         message.push_str("\r\n");
         Ok(message)
     }
+}
+
+#[derive(Debug, Error)]
+pub enum IrcParseErr {
+    #[error("message contains interior CRLF")]
+    InteriorCRLF,
+    #[error("message is missing a command")]
+    MissingCommand,
+    #[error(transparent)]
+    MessageParseErr(#[from] MessageParseErr),
+}
+
+#[derive(Debug, Error)]
+pub enum MessageToStringErr {
+    #[error("clients may not create a {} message", .0)]
+    ClientMayNotCreate(String),
+    #[error("clients must not send a source with their messages")]
+    ClientMustNotSendSource,
+    #[error("message had invalid params")]
+    InvalidParams,
 }
 
 #[derive(Debug, Error)]
