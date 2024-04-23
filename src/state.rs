@@ -4,7 +4,7 @@ use std::{
     sync::mpsc::Sender,
 };
 
-use crossterm::style::Stylize;
+use crossterm::style::{Color, Stylize};
 use log::*;
 
 use crate::{
@@ -15,6 +15,7 @@ use crate::{
 };
 
 pub struct ClientState<'a> {
+    addr: String,
     pub ui: TerminalUi<'a>,
     pub conn_state: ConnectionState,
     all_targets: Vec<Target>,
@@ -23,11 +24,25 @@ pub struct ClientState<'a> {
     pub msg_sender: Sender<IRCMessage>,
 }
 
+#[derive(Debug)]
+pub struct StatusInfo {
+    pub addr: String,
+    pub registered: bool,
+    pub nick: String,
+    pub target: Target,
+}
+
 impl<'a> ClientState<'a> {
     const TARGET_STATUS_IDX: usize = 0;
 
-    pub fn new(msg_sender: Sender<IRCMessage>, ui: TerminalUi<'a>, requested_nick: String) -> Self {
+    pub fn new(
+        addr: impl ToString,
+        msg_sender: Sender<IRCMessage>,
+        ui: TerminalUi<'a>,
+        requested_nick: String,
+    ) -> Self {
         Self {
+            addr: addr.to_string(),
             ui,
             conn_state: ConnectionState::Registration(RegistrationState { requested_nick }),
             all_targets: vec![Target::Status],
@@ -35,6 +50,10 @@ impl<'a> ClientState<'a> {
             status_messages: VecDeque::new(),
             msg_sender,
         }
+    }
+
+    pub fn addr(&self) -> &str {
+        self.addr.as_str()
     }
 
     pub fn add_line(&mut self, target: Target, line: Line<'static>) {
@@ -118,8 +137,23 @@ impl<'a> ClientState<'a> {
             }
         };
         trace!("rendering for {:?}", target);
+
+        let (registered, nick) = match &mut self.conn_state {
+            ConnectionState::Registration(RegistrationState { requested_nick }) => {
+                (false, requested_nick)
+            }
+            ConnectionState::Connected(ConnectedState { nick, .. }) => (true, nick),
+        };
+
+        let status = StatusInfo {
+            addr: self.addr.clone(),
+            registered,
+            nick: nick.clone(),
+            target: self.current_target().clone(),
+        };
+
         if target == &Target::Status {
-            self.ui.render(self.status_messages.iter())?;
+            self.ui.render(&status, self.status_messages.iter())?;
             return Ok(());
         }
 
@@ -128,12 +162,11 @@ impl<'a> ClientState<'a> {
             ConnectionState::Connected(ConnectedState { channels, .. }) => {
                 match channels.get(target) {
                     Some(channel) => {
-                        self.ui.render(channel.messages.iter())?;
+                        self.ui.render(&status, channel.messages.iter())?;
                     }
                     None => {
                         self.selected_target_idx = ClientState::TARGET_STATUS_IDX;
-                        // render the status page
-                        self.ui.render(self.status_messages.iter())?;
+                        self.ui.render(&status, self.status_messages.iter())?;
                     }
                 }
 

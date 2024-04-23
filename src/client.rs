@@ -92,9 +92,13 @@ pub fn start(
             Section::Leaf {
                 kind: SectionKind::Exact(1),
             },
+            Section::Leaf {
+                kind: SectionKind::Exact(1),
+            },
         ],
     };
     let mut state = ClientState::new(
+        addr,
         write_sender.clone(),
         TerminalUi::new(layout, io::stdout())?,
         nick.to_string(),

@@ -1,16 +1,26 @@
 use core::time::Duration;
 use std::{collections::VecDeque, io};
 
-use crossterm::{cursor, event, event::Event, execute, style::Stylize, terminal};
+use crossterm::{
+    cursor, event,
+    event::Event,
+    execute,
+    style::{Color, Stylize},
+    terminal,
+};
 use eyre::bail;
 use log::*;
 
-use crate::ui::{
-    input_buffer::InputBuffer,
-    keybinds::Action,
-    layout::{Layout, Rect},
-    text,
-    text::{DrawTextConfig, Line, WrapMode},
+use crate::{
+    state::StatusInfo,
+    ui::{
+        input_buffer::InputBuffer,
+        keybinds::Action,
+        layout::{Layout, Rect},
+        text,
+        text::{DrawTextConfig, Line, WrapMode},
+    },
+    util::unicode_width,
 };
 
 pub struct TerminalUi<'a> {
@@ -76,12 +86,13 @@ impl<'a> TerminalUi<'a> {
     const MAIN_TEXT_WRAP_MODE: WrapMode = WrapMode::WordWrap;
 
     /// lines contains the full history of lines to render
-    pub fn render<'line>(
+    pub fn render<'line, 'lines>(
         &mut self,
-        lines: impl DoubleEndedIterator<Item = &'line Line<'line>>,
+        status: &StatusInfo,
+        lines: impl DoubleEndedIterator<Item = &'lines Line<'lines>>,
     ) -> eyre::Result<()> {
         let layout = self.layout.calc(terminal::size()?);
-        let [main_rect, input_rect] = layout.as_slice() else {
+        let [main_rect, status_rect, input_rect] = layout.as_slice() else {
             bail!("incorrect number of components in split layout");
         };
 
@@ -89,6 +100,7 @@ impl<'a> TerminalUi<'a> {
         execute!(self.terminal, terminal::Clear(terminal::ClearType::All))?;
 
         self.draw_main(*main_rect, lines)?;
+        self.draw_status(status, *status_rect)?;
         self.draw_input(input_rect)?;
 
         Ok(())
@@ -137,6 +149,49 @@ impl<'a> TerminalUi<'a> {
                 },
             )?;
         }
+
+        Ok(())
+    }
+
+    fn draw_status(&mut self, status: &StatusInfo, status_rect: Rect) -> eyre::Result<()> {
+        const STATUS_BG: Color = Color::Rgb {
+            r: 0x61,
+            g: 0x2B,
+            b: 0x5B,
+        };
+        const ADDR: Color = Color::Rgb {
+            r: 0xF4,
+            g: 0x5B,
+            b: 0x46,
+        };
+        const NICK: Color = Color::Rgb {
+            r: 0xFC,
+            g: 0x91,
+            b: 0x00,
+        };
+
+        let mut status_line = Line::default().push(status.addr.clone().with(ADDR).on(STATUS_BG));
+        if !status.registered {
+            status_line = status_line.push(" *REGISTRATION*".on(STATUS_BG));
+        }
+        status_line = status_line
+            .push(format!(" {}", status.nick).with(NICK).on(STATUS_BG))
+            .push(format!(" - {}", status.target).on(STATUS_BG));
+
+        let pad = usize::from(status_rect.width).saturating_sub(unicode_width::display_width(
+            status_line.fmt_unstyled().as_str(),
+        ));
+
+        status_line = status_line.push(" ".repeat(pad).on(STATUS_BG));
+
+        text::draw_text(
+            &mut self.terminal,
+            status_rect,
+            &status_line,
+            DrawTextConfig {
+                wrap: Self::MAIN_TEXT_WRAP_MODE,
+            },
+        )?;
 
         Ok(())
     }
