@@ -78,6 +78,17 @@ impl<'a> ClientState<'a> {
         self.render();
     }
 
+    pub fn warn_in(&mut self, target: &Target, msg: String) {
+        let Some(lines) = self.lines_for(target) else {
+            warn!("cannot warn {} in unknown target {:?}", msg, target);
+            return;
+        };
+        warn!("{:?} {}", target, msg);
+        let line = Line::default().push("WARN: ".yellow()).push(msg.yellow());
+        lines.push_back(line);
+        self.render();
+    }
+
     pub fn join_channel(&mut self, channel: Channel) {
         match &mut self.conn_state {
             ConnectionState::Registration(_) => todo!(),
@@ -221,6 +232,22 @@ impl<'a> ClientState<'a> {
                 &Target::Status
             }
         };
+        match target {
+            Target::Status => Some(&mut self.status_messages),
+            Target::Channel(_) => {
+                if let ConnectionState::Connected(ConnectedState { channels, .. }) =
+                    &mut self.conn_state
+                {
+                    channels.get_mut(target).map(|c| &mut c.messages)
+                } else {
+                    None
+                }
+            }
+            Target::Nickname(_) => todo!(),
+        }
+    }
+
+    fn lines_for(&mut self, target: &Target) -> Option<&mut VecDeque<Line<'static>>> {
         match target {
             Target::Status => Some(&mut self.status_messages),
             Target::Channel(_) => {

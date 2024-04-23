@@ -86,7 +86,7 @@ impl IRCMessage {
                         }
                     }
                     None => {
-                        state.warn(String::from("JOIN msg without a source"));
+                        state.warn_in(&Target::Status, String::from("JOIN msg without a source"));
                     }
                 }
             }
@@ -121,7 +121,10 @@ impl IRCMessage {
             }
             Message::Mode { target, mode } => {
                 let Some(mode) = mode else {
-                    state.warn(format!("server sent MODE for {} without modestr", target));
+                    state.warn_in(
+                        &Target::Status,
+                        format!("server sent MODE for {} without modestr", target),
+                    );
                     return Ok(());
                 };
 
@@ -130,17 +133,20 @@ impl IRCMessage {
                     ..
                 } = state
                 else {
-                    state.warn(String::from("must be connected to handle MODE"));
+                    state.warn_in(
+                        &Target::Status,
+                        String::from("must be connected to handle MODE"),
+                    );
                     return Ok(());
                 };
 
                 match target {
                     Target::Channel(channel_name) => {
                         let Some(channel) = channels.get_mut(target) else {
-                            state.warn(format!(
-                                "unexpected MODE for not joined channel {}",
-                                channel_name
-                            ));
+                            state.warn_in(
+                                &Target::Status,
+                                format!("unexpected MODE for not joined channel {}", channel_name),
+                            );
                             return Ok(());
                         };
 
@@ -149,10 +155,13 @@ impl IRCMessage {
                         // TODO: mode messages
                     }
                     Target::Nickname(_) => {
-                        state.warn(String::from("MODE for nicknames NYI"));
+                        state.warn_in(&Target::Status, String::from("MODE for nicknames NYI"));
                     }
                     _ => {
-                        state.warn(String::from("could not determine target for MODE"));
+                        state.warn_in(
+                            &Target::Status,
+                            String::from("could not determine target for MODE"),
+                        );
                     }
                 }
             }
@@ -205,7 +214,10 @@ impl IRCMessage {
                     ..
                 } = state
                 else {
-                    state.warn(String::from("RPL_WELCOME when already registered"));
+                    state.warn_in(
+                        &Target::Status,
+                        String::from("RPL_WELCOME when already registered"),
+                    );
                     return Ok(());
                 };
                 let requested_nick = requested_nick.clone();
@@ -218,10 +230,13 @@ impl IRCMessage {
                 };
 
                 if requested_nick != nick {
-                    state.warn(format!(
-                        "WARNING: requested nick {}, but got nick {}",
-                        requested_nick, nick
-                    ));
+                    state.warn_in(
+                        &Target::Status,
+                        format!(
+                            "WARNING: requested nick {}, but got nick {}",
+                            requested_nick, nick
+                        ),
+                    );
                 }
 
                 state.conn_state =
@@ -291,7 +306,7 @@ impl IRCMessage {
                     return Ok(());
                 };
                 let Some(ops): Option<u16> = ops.as_str().and_then(|s| s.parse().ok()) else {
-                    state.warn(String::from("RPL_USEROP was not a u16"));
+                    state.warn_in(&Target::Status, String::from("RPL_USEROP was not a u16"));
                     return Ok(());
                 };
                 let Some(msg) = msg.as_str() else {
@@ -310,7 +325,10 @@ impl IRCMessage {
                 };
                 let Some(connections): Option<u16> = ops.as_str().and_then(|s| s.parse().ok())
                 else {
-                    state.warn(String::from("RPL_LUSERUNKNOWN was not a u16"));
+                    state.warn_in(
+                        &Target::Status,
+                        String::from("RPL_LUSERUNKNOWN was not a u16"),
+                    );
                     return Ok(());
                 };
                 let Some(msg) = msg.as_str() else {
@@ -331,7 +349,10 @@ impl IRCMessage {
                     return Ok(());
                 };
                 let Some(channels): Option<u16> = ops.as_str().and_then(|s| s.parse().ok()) else {
-                    state.warn(String::from("RPL_LUSERCHANNELS was not a u16"));
+                    state.warn_in(
+                        &Target::Status,
+                        String::from("RPL_LUSERCHANNELS was not a u16"),
+                    );
                     return Ok(());
                 };
                 let Some(msg) = msg.as_str() else {
@@ -404,11 +425,14 @@ impl IRCMessage {
                 let ConnectedState { messages_state, .. } = expect_connected_state!(state, self)?;
 
                 let [_, _, channel, names_list @ ..] = args.as_slice() else {
-                    state.warn(String::from("RPL_NAMREPLY missing params"));
+                    state.warn_in(&Target::Status, String::from("RPL_NAMREPLY missing params"));
                     return Ok(());
                 };
                 let Some(channel) = channel.as_str() else {
-                    state.warn(String::from("RPL_NAMREPLY malformed params"));
+                    state.warn_in(
+                        &Target::Status,
+                        String::from("RPL_NAMREPLY malformed params"),
+                    );
                     return Ok(());
                 };
 
@@ -432,33 +456,42 @@ impl IRCMessage {
                     ..
                 } = expect_connected_state!(state, self)?;
                 let [_, channel, ..] = args.as_slice() else {
-                    state.warn(String::from("RPL_ENDOFNAMES missing args"));
+                    state.warn_in(&Target::Status, String::from("RPL_ENDOFNAMES missing args"));
                     return Ok(());
                 };
                 let Some(channel_name) = channel.as_str() else {
-                    state.warn(String::from("RPL_ENDOFNAMES malformed args"));
+                    state.warn_in(
+                        &Target::Status,
+                        String::from("RPL_ENDOFNAMES malformed args"),
+                    );
                     return Ok(());
                 };
 
                 let Some(target) = Target::new(channel_name) else {
-                    state.warn(format!("RPL_ENDOFNAMES invalid channel {:?}", channel_name));
+                    state.warn_in(
+                        &Target::Status,
+                        format!("RPL_ENDOFNAMES invalid channel {:?}", channel_name),
+                    );
                     return Ok(());
                 };
 
                 let Some(NamesState { names }) = messages_state.active_names.remove(channel_name)
                 else {
-                    state.warn(format!(
-                        "did not expect a RPL_ENDOFNAMES for {}",
-                        channel_name
-                    ));
+                    state.warn_in(
+                        &Target::Status,
+                        format!("did not expect a RPL_ENDOFNAMES for {}", channel_name),
+                    );
                     return Ok(());
                 };
 
                 let Some(channel) = channels.get_mut(&target) else {
-                    state.warn(format!(
-                        "cannot update names for channel not joined: {}",
-                        channel_name
-                    ));
+                    state.warn_in(
+                        &Target::Status,
+                        format!(
+                            "cannot update names for channel not joined: {}",
+                            channel_name
+                        ),
+                    );
                     return Ok(());
                 };
 
@@ -480,7 +513,7 @@ impl IRCMessage {
             Message::Numeric {
                 num: RPL_UMODEIS, ..
             } => {
-                state.warn(String::from("TODO: RPL_UMODEIS"));
+                self.unhandled(state);
             }
 
             // =========================================
@@ -497,7 +530,7 @@ impl IRCMessage {
             }
 
             Message::Unknown { .. } => {
-                state.warn(format!("unhandled unknown msg {:?}", self));
+                state.warn_in(&Target::Status, format!("unhandled unknown msg {:?}", self));
             }
 
             // fatal error, the connection will be terminated
