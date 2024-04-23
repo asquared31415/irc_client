@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use log::debug;
+use log::*;
 
 pub enum Action {
     /// terminal resized
@@ -43,7 +43,7 @@ impl Action {
             return None;
         }
 
-        debug!("mods {:?} code {:?}", modifiers, code);
+        trace!("mods {:?} code {:?}", modifiers, code);
 
         if modifiers.contains(KeyModifiers::CONTROL) {
             match code {

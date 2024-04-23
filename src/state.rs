@@ -94,6 +94,10 @@ impl<'a> ClientState<'a> {
         }
     }
 
+    pub fn current_target(&self) -> &Target {
+        &self.all_targets[self.selected_target_idx]
+    }
+
     pub fn render(&mut self) -> eyre::Result<()> {
         let target = match self.all_targets.get(self.selected_target_idx) {
             Some(target) => target,

@@ -264,32 +264,27 @@ fn handle_input(
 
             if channels.len() == 0 {
                 state.error(String::from("cannot send a message to 0 channels"));
-            } else if channels.len() > 1 {
-                state.error(String::from("multiple channels NYI"));
-            } else {
-                let targets = channels
-                    .iter()
-                    .map(|(_, c)| Target::Channel(c.name().to_string()))
-                    .collect::<Vec<_>>();
-                for target in targets.iter() {
-                    let line = Line::default()
-                        .push_unstyled("<")
-                        .push(nick.to_string().magenta().bold())
-                        .push_unstyled(">")
-                        .push_unstyled(input);
-                    state.add_line(target.clone(), line);
-                }
-                sender
-                    .send(IRCMessage {
-                        tags: None,
-                        source: None,
-                        message: Message::Privmsg {
-                            targets,
-                            msg: input.to_string(),
-                        },
-                    })
-                    .wrap_err("failed to send privmsg to writer thread")?;
             }
+
+            let target = state.current_target().clone();
+            trace!("sending to {:?}", target);
+            let line = Line::default()
+                .push_unstyled("<")
+                .push(nick.to_string().magenta().bold())
+                .push_unstyled(">")
+                .push_unstyled(input);
+
+            state.add_line(target.clone(), line);
+            sender
+                .send(IRCMessage {
+                    tags: None,
+                    source: None,
+                    message: Message::Privmsg {
+                        targets: vec![target],
+                        msg: input.to_string(),
+                    },
+                })
+                .wrap_err("failed to send privmsg to writer thread")?;
 
             Ok(())
         }

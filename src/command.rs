@@ -82,11 +82,7 @@ impl Command {
     pub fn handle(&self, state: &mut ClientState, sender: &Sender<IRCMessage>) -> eyre::Result<()> {
         match self {
             Command::Join(channel) => {
-                let ConnectedState { channels, .. } = expect_connected_state!(state, "JOIN")?;
-
-                if channels.len() > 0 {
-                    bail!("cannot JOIN more than one channel (NYI)");
-                }
+                let ConnectedState { .. } = expect_connected_state!(state, "JOIN")?;
 
                 let target = Target::new(channel.to_string())
                     .ok_or_else(|| eyre!("join was invalid channel {:?}", channel))?;
