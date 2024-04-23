@@ -1,5 +1,3 @@
-// FIXME: none of this can handle UTF8 input properly!
-
 use log::*;
 use unicode_segmentation::UnicodeSegmentation as _;
 
@@ -46,19 +44,45 @@ impl InputBuffer {
         }
     }
 
-    /// set the selection index to idx. clamps the value to within the valid range.
+    /// set the selection index to the character with index idx
     pub fn select(&mut self, idx: usize) {
-        self.cursor_idx = usize::min(idx, self.buffer.len());
+        let byte_idx = match self.buffer.char_indices().skip(idx).next() {
+            Some((idx, _)) => idx,
+            // skipped past the end, clamp to end
+            None => self.buffer.len(),
+        };
+        self.cursor_idx = byte_idx;
     }
 
-    /// move the selection index. clamps the value to within the valid range.
+    /// offset the selection index by `offset` *characters*
     pub fn offset(&mut self, offset: isize) {
-        let ideal_idx = self.cursor_idx.saturating_add_signed(offset);
-        self.cursor_idx = usize::min(ideal_idx, self.buffer.len());
+        let mut offset = offset;
+
+        // advance forwards
+        while offset > 0 {
+            if let Some(c) = self.buffer.get(self.cursor_idx..self.cursor_idx + 1) {
+                self.cursor_idx += c.len();
+                offset -= 1;
+            } else {
+                // at end, cannot go farther
+                return;
+            }
+        }
+
+        // go backwards
+        while offset < 0 {
+            if self.cursor_idx > 0 {
+                self.cursor_idx = self.buffer.floor_char_boundary(self.cursor_idx - 1);
+                offset += 1;
+            } else {
+                // at start
+                return;
+            }
+        }
     }
 
-    pub fn buffer(&self) -> &str {
-        self.buffer.as_str()
+    pub fn char_len(&self) -> usize {
+        self.buffer.chars().count()
     }
 
     // TODO: this is likely slightly incorrect in the face of different widths for graphemes

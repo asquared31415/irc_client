@@ -10,7 +10,7 @@ use log::*;
 use crate::{
     channel::channel::Channel,
     irc_message::IRCMessage,
-    ui::{term::TerminalUi, text::Line},
+    ui::{keybinds::Action, term::TerminalUi, text::Line},
     util::Target,
 };
 
@@ -123,6 +123,88 @@ impl<'a> ClientState<'a> {
                 }
 
                 Ok(())
+            }
+        }
+    }
+
+    /// collects input from the user, re-rendering if necessary
+    pub fn input(&mut self) -> eyre::Result<Option<String>> {
+        let Some(action) = self.ui.raw_input()? else {
+            return Ok(None);
+        };
+
+        match action {
+            Action::Resize => {
+                self.render()?;
+                Ok(None)
+            }
+            Action::Type(c) => {
+                self.ui.input_buffer.insert(c);
+                self.render()?;
+                Ok(None)
+            }
+            Action::Enter => {
+                let s = self.ui.input_buffer.finish();
+                self.render()?;
+                Ok(Some(s))
+            }
+            Action::Backspace => {
+                self.ui.input_buffer.backspace();
+                self.render()?;
+                Ok(None)
+            }
+            Action::Delete => {
+                self.ui.input_buffer.delete();
+                self.render()?;
+                Ok(None)
+            }
+            Action::PreviousLine => {
+                self.ui.scrollback = self.ui.scrollback.saturating_add(1);
+                self.render()?;
+                Ok(None)
+            }
+            Action::NextLine => {
+                self.ui.scrollback = self.ui.scrollback.saturating_sub(1);
+                self.render()?;
+                Ok(None)
+            }
+            Action::PreviousCharacter => {
+                self.ui.input_buffer.offset(-1);
+                self.render()?;
+                Ok(None)
+            }
+            Action::NextCharacter => {
+                self.ui.input_buffer.offset(1);
+                self.render()?;
+                Ok(None)
+            }
+            Action::FirstCharacter => {
+                self.ui.input_buffer.select(0);
+                self.render()?;
+                Ok(None)
+            }
+            Action::LastCharacter => {
+                self.ui.input_buffer.select(self.ui.input_buffer.char_len());
+                self.render()?;
+                Ok(None)
+            }
+            Action::PreviousWindow => {
+                if self.selected_target_idx > 0 {
+                    self.selected_target_idx -= 1;
+                } else {
+                    self.selected_target_idx = self.all_targets.len() - 1;
+                }
+                self.render()?;
+                Ok(None)
+            }
+            Action::NextWindow => {
+                if self.selected_target_idx < self.all_targets.len() - 1 {
+                    self.selected_target_idx += 1;
+                } else {
+                    self.selected_target_idx = 0
+                }
+                self.render()?;
+                Ok(None)
             }
         }
     }

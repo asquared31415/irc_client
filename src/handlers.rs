@@ -1,6 +1,5 @@
 use crossterm::style::Stylize as _;
 use eyre::{bail, eyre};
-use log::*;
 
 use crate::{
     channel::channel::Channel,

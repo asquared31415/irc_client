@@ -19,43 +19,10 @@ pub struct Line<'a> {
 }
 
 impl<'a> Line<'a> {
-    pub fn warn(msg: impl ToString) -> Self {
-        let content = msg.to_string().replace(['\r', '\n'], "");
-        Self {
-            content: vec![DynStyledContentWrapper {
-                style: ContentStyle::default(),
-                content: Box::new(content),
-            }],
-        }
-    }
-
-    pub fn new_without_style<S: AsRef<str>>(s: S) -> Option<Line<'a>> {
-        let content = s.as_ref().to_string();
-        if !content.contains('\n') {
-            Some(Self {
-                content: vec![DynStyledContentWrapper {
-                    style: ContentStyle::default(),
-                    content: Box::new(content),
-                }],
-            })
-        } else {
-            None
-        }
-    }
-
     pub fn push<D: Display>(mut self, styled: StyledContent<D>) -> Self {
         self.content.push(DynStyledContentWrapper {
             style: *styled.style(),
             content: Box::new(styled.content().to_string()),
-        });
-        self
-    }
-
-    pub fn push_with_style<S: AsRef<str>>(mut self, content: S, style: ContentStyle) -> Self {
-        let content = content.as_ref().replace(' ', "");
-        self.content.push(DynStyledContentWrapper {
-            style,
-            content: Box::new(content),
         });
         self
     }

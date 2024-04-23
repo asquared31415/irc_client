@@ -27,7 +27,7 @@ use crate::{
     state::{ClientState, ConnectedState, ConnectionState},
     ui::{
         layout::{Direction, Layout, Section, SectionKind},
-        term::{InputStatus, TerminalUi},
+        term::TerminalUi,
         text::Line,
     },
     util::Target,
@@ -82,10 +82,6 @@ pub fn start(
     let (write_sender, write_receiver) = mpsc::channel::<IRCMessage>();
     // recv from this channel to get incoming messages from the server
     let (msg_sender, msg_receiver) = mpsc::channel::<IRCMessage>();
-
-    // write to this channel to cause the ui to re-render
-    // this is used when messages arrive or user input is handled.
-    let (render_send, render_recv) = mpsc::channel::<()>();
 
     let layout = Layout {
         direction: Direction::Vertical,
@@ -168,24 +164,12 @@ pub fn start(
 
                 let input = || -> Result<(), InputErr> {
                     let state = &mut *state.lock().unwrap();
-                    let ret = match state.ui.input() {
-                        InputStatus::Complete(input) => {
-                            // on complete, need to re-render to clear msg
-                            render_send.send(());
-                            handle_input(state, &queue_sender, input.trim_start())
-                        }
-                        // incomplete input, loop again
-                        InputStatus::Incomplete { rerender } => {
-                            // some incomplete messages affect the cursor or input buffer state,
-                            // re-render for those
-                            if rerender {
-                                render_send.send(());
-                            }
-                            Ok(())
-                        }
-                        InputStatus::IoErr(e) => Err(InputErr::Io(e)),
-                    };
-                    ret
+                    // note: this re-renders if needed
+                    match state.input() {
+                        Ok(Some(input)) => handle_input(state, &queue_sender, input.as_str()),
+                        Ok(None) => Ok(()),
+                        Err(e) => Err(e.into()),
+                    }
                 }();
 
                 match input {
@@ -206,29 +190,6 @@ pub fn start(
                         state.lock().unwrap().ui.error(e.to_string()).unwrap();
                         return;
                     }
-                }
-            }
-        }
-    });
-
-    // ui message update thread
-    let _ = thread::spawn({
-        let state = Arc::clone(&state);
-        move || {
-            loop {
-                let res = (|| -> eyre::Result<()> {
-                    match render_recv.recv() {
-                        Ok(_) => {
-                            state.lock().unwrap().render()?;
-                            Ok(())
-                        }
-                        Err(_) => bail!("ui message channel closed"),
-                    }
-                })();
-
-                match res {
-                    Ok(()) => {}
-                    Err(report) => state.lock().unwrap().ui.error(report.to_string()).unwrap(),
                 }
             }
         }

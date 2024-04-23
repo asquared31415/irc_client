@@ -1,18 +1,13 @@
 use core::time::Duration;
 use std::{collections::VecDeque, io};
 
-use crossterm::{
-    cursor, event,
-    event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
-    execute,
-    style::Stylize,
-    terminal,
-};
+use crossterm::{cursor, event, event::Event, execute, style::Stylize, terminal};
 use eyre::bail;
 use log::*;
 
 use crate::ui::{
     input_buffer::InputBuffer,
+    keybinds::Action,
     layout::{Layout, Rect},
     text,
     text::{DrawTextConfig, Line, WrapMode},
@@ -23,15 +18,8 @@ pub struct TerminalUi<'a> {
     layout: Layout,
     history: VecDeque<Line<'a>>,
     /// the last `scrollback` messages of the history should be hidden (would be below the screen)
-    scrollback: usize,
-    input_buffer: InputBuffer,
-}
-
-#[derive(Debug)]
-pub enum InputStatus {
-    Complete(String),
-    Incomplete { rerender: bool },
-    IoErr(io::Error),
+    pub scrollback: usize,
+    pub input_buffer: InputBuffer,
 }
 
 impl<'a> TerminalUi<'a> {
@@ -48,6 +36,41 @@ impl<'a> TerminalUi<'a> {
             scrollback: 0,
             input_buffer: InputBuffer::default(),
         })
+    }
+
+    pub fn error(&mut self, msg: impl Into<String>) -> eyre::Result<()> {
+        let msg = msg.into();
+        error!("{}", msg);
+        self.history
+            .push_back(Line::default().push(format!("ERROR: {}", msg).red()));
+        Ok(())
+    }
+
+    pub fn raw_input(&mut self) -> Result<Option<Action>, io::Error> {
+        const POLL_TIMEOUT: Duration = Duration::from_micros(100);
+
+        match event::poll(POLL_TIMEOUT) {
+            Ok(true) => {}
+            // don't need to re-render if there's not a message to handle
+            Ok(false) => return Ok(None),
+            Err(e) => return Err(e),
+        }
+
+        let Ok(event) = event::read() else {
+            unreachable!("poll claimed to be ready")
+        };
+
+        match event {
+            Event::Key(key_event) => Ok(Action::create(key_event)),
+            Event::Resize(_, _) => Ok(Some(Action::Resize)),
+            Event::FocusGained | Event::FocusLost | Event::Mouse(_) | Event::Paste(_) => Ok(None),
+        }
+    }
+
+    pub fn disable(&mut self) {
+        execute!(self.terminal, terminal::LeaveAlternateScreen)
+            .expect("unable to leave alternate screen");
+        terminal::disable_raw_mode().expect("unable to disable raw mode");
     }
 
     const MAIN_TEXT_WRAP_MODE: WrapMode = WrapMode::WordWrap;
@@ -151,150 +174,5 @@ impl<'a> TerminalUi<'a> {
         execute!(self.terminal, cursor::MoveToColumn(cursor_col as u16))?;
 
         Ok(())
-    }
-
-    fn writeln(&mut self, line: impl Into<Line<'a>>) -> eyre::Result<()> {
-        let line = line.into();
-        info!("{}", line.fmt_unstyled());
-        self.history.push_back(line);
-        Ok(())
-    }
-
-    fn warn(&mut self, msg: impl Into<String>) -> eyre::Result<()> {
-        let msg = msg.into();
-        warn!("{}", msg);
-        self.history
-            .push_back(Line::default().push(format!("WARN: {}", msg).yellow()));
-        Ok(())
-    }
-
-    pub fn error(&mut self, msg: impl Into<String>) -> eyre::Result<()> {
-        let msg = msg.into();
-        error!("{}", msg);
-        self.history
-            .push_back(Line::default().push(format!("ERROR: {}", msg).red()));
-        Ok(())
-    }
-
-    pub fn input(&mut self) -> InputStatus {
-        const POLL_TIMEOUT: Duration = Duration::from_micros(100);
-
-        match event::poll(POLL_TIMEOUT) {
-            Ok(true) => {}
-            // don't need to re-render if there's not a message to handle
-            Ok(false) => return InputStatus::Incomplete { rerender: false },
-            Err(e) => return InputStatus::IoErr(e),
-        }
-
-        let Ok(event) = event::read() else { todo!() };
-
-        match event {
-            Event::Key(KeyEvent {
-                code,
-                kind,
-                modifiers,
-                ..
-            }) => {
-                // only detecting key down
-                if kind != KeyEventKind::Press {
-                    // don't need to re-render if we do nothing
-                    return InputStatus::Incomplete { rerender: false };
-                }
-
-                // KEYBINDS
-                if modifiers.contains(KeyModifiers::CONTROL) {
-                    if let KeyCode::Char(c) = code {
-                        let status = match c {
-                            // these navigations are very emacs inspired
-                            'p' => {
-                                self.scrollback = usize::min(
-                                    self.scrollback.saturating_add(1),
-                                    self.history.len().saturating_sub(1),
-                                );
-                                InputStatus::Incomplete { rerender: true }
-                            }
-                            'n' => {
-                                // this can never over-scroll because saturating caps at 0
-                                self.scrollback = self.scrollback.saturating_sub(1);
-                                InputStatus::Incomplete { rerender: true }
-                            }
-                            'f' => {
-                                self.input_buffer.offset(1);
-                                InputStatus::Incomplete { rerender: true }
-                            }
-                            'b' => {
-                                self.input_buffer.offset(-1);
-                                InputStatus::Incomplete { rerender: true }
-                            }
-                            'a' => {
-                                self.input_buffer.select(0);
-                                InputStatus::Incomplete { rerender: true }
-                            }
-                            'e' => {
-                                self.input_buffer.select(self.input_buffer.buffer().len());
-                                InputStatus::Incomplete { rerender: true }
-                            }
-                            'd' => {
-                                self.input_buffer.delete();
-                                InputStatus::Incomplete { rerender: true }
-                            }
-                            // didn't handle a command, don't rerender
-                            _ => InputStatus::Incomplete { rerender: false },
-                        };
-                        return status;
-                    }
-                }
-
-                match code {
-                    KeyCode::Enter => InputStatus::Complete(self.input_buffer.finish()),
-                    KeyCode::Char(c) => {
-                        self.input_buffer.insert(c);
-                        InputStatus::Incomplete { rerender: true }
-                    }
-                    KeyCode::Backspace => {
-                        self.input_buffer.backspace();
-                        InputStatus::Incomplete { rerender: true }
-                    }
-                    KeyCode::Delete => {
-                        self.input_buffer.delete();
-                        InputStatus::Incomplete { rerender: true }
-                    }
-
-                    KeyCode::Right
-                    | KeyCode::Left
-                    | KeyCode::Up
-                    | KeyCode::Down
-                    | KeyCode::Home
-                    | KeyCode::End
-                    | KeyCode::PageUp
-                    | KeyCode::PageDown
-                    | KeyCode::Tab
-                    | KeyCode::BackTab
-                    | KeyCode::Insert
-                    | KeyCode::F(_)
-                    | KeyCode::Null
-                    | KeyCode::CapsLock
-                    | KeyCode::ScrollLock
-                    | KeyCode::NumLock
-                    | KeyCode::PrintScreen
-                    | KeyCode::Pause
-                    | KeyCode::Menu
-                    | KeyCode::KeypadBegin
-                    | KeyCode::Media(_)
-                    | KeyCode::Esc
-                    | KeyCode::Modifier(_) => InputStatus::Incomplete { rerender: false },
-                }
-            }
-            Event::Resize(_, _) => InputStatus::Incomplete { rerender: true },
-            Event::FocusGained | Event::FocusLost | Event::Mouse(_) | Event::Paste(_) => {
-                InputStatus::Incomplete { rerender: false }
-            }
-        }
-    }
-
-    pub fn disable(&mut self) {
-        execute!(self.terminal, terminal::LeaveAlternateScreen)
-            .expect("unable to leave alternate screen");
-        terminal::disable_raw_mode().expect("unable to disable raw mode");
     }
 }
