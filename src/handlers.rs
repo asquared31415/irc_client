@@ -92,7 +92,7 @@ impl IRCMessage {
             }
             Message::Part(channels, reason) => {
                 let Some(name) = self.source.as_ref().map(Source::get_name) else {
-                    bail!("QUIT msg had no source");
+                    bail!("PART msg had no source");
                 };
 
                 let channels =
@@ -104,7 +104,7 @@ impl IRCMessage {
                         });
 
                 for channel in channels {
-                    let mut line = Line::default().push(name.magenta()).push_unstyled(" quit");
+                    let mut line = Line::default().push(name.magenta()).push_unstyled(" left");
                     // reasons are entirely optional
                     if let Some(reason) = reason {
                         line = line.push_unstyled(format!(": {}", reason));
