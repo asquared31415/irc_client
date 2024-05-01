@@ -1,5 +1,5 @@
 use unicode_segmentation::UnicodeSegmentation as _;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::UnicodeWidthChar;
 
 /// MIT License
 ///
@@ -82,6 +82,20 @@ fn display_width_char(string: &str) -> usize {
             // I choose 4 columns as that's what most applications render a tab as.
             4
         }
-        _ => UnicodeWidthStr::width(string),
+        _ => {
+            let mut sum = 0;
+            let mut chars = string.chars().peekable();
+            while let Some(c) = chars.next() {
+                // if a character is followed by a emoji presentation selector, consider it to be 2
+                // wide
+                if matches!(chars.peek(), Some('\u{fe0f}')) {
+                    chars.next();
+                    sum += 2;
+                } else {
+                    sum += UnicodeWidthChar::width(c).unwrap_or(0);
+                }
+            }
+            sum
+        }
     }
 }
