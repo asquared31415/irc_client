@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::{
     channel::channel::Channel,
-    irc_message::{IRCMessage, Message},
+    irc_message::{IrcMessage, Message},
     state::{ClientState, ConnectedState, ConnectionState},
     util::Target,
 };
@@ -79,7 +79,7 @@ impl Command {
         }
     }
 
-    pub fn handle(&self, state: &mut ClientState, sender: &Sender<IRCMessage>) -> eyre::Result<()> {
+    pub fn handle(&self, state: &mut ClientState, sender: &Sender<IrcMessage>) -> eyre::Result<()> {
         match self {
             Command::Join(channel) => {
                 let ConnectedState { .. } = expect_connected_state!(state, "JOIN")?;
@@ -87,7 +87,7 @@ impl Command {
                 let target = Target::new(channel.to_string())
                     .ok_or_else(|| eyre!("join was invalid channel {:?}", channel))?;
 
-                sender.send(IRCMessage {
+                sender.send(IrcMessage {
                     tags: None,
                     source: None,
                     message: Message::Join(vec![(channel.to_string(), None)]),
@@ -99,14 +99,14 @@ impl Command {
                 // don't need to access the state here, just need to ensure connected
                 let _ = expect_connected_state!(state, "RAW")?;
 
-                sender.send(IRCMessage {
+                sender.send(IrcMessage {
                     tags: None,
                     source: None,
                     message: Message::Raw(text.to_string()),
                 })?;
             }
             Command::Quit => {
-                sender.send(IRCMessage {
+                sender.send(IrcMessage {
                     tags: None,
                     source: None,
                     message: Message::Quit(None),

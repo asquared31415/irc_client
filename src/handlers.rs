@@ -3,7 +3,7 @@ use eyre::{bail, eyre};
 
 use crate::{
     channel::channel::Channel,
-    irc_message::{IRCMessage, Message, Param, Source},
+    irc_message::{IrcMessage, Message, Param, Source},
     state::{ClientState, ConnectedState, ConnectionState, NamesState, RegistrationState},
     ui::text::Line,
     util::Target,
@@ -18,7 +18,7 @@ macro_rules! expect_connected_state {
     };
 }
 
-impl IRCMessage {
+impl IrcMessage {
     fn unhandled(&self, state: &mut ClientState) {
         state.warn(format!("unhandled msg {:?}", self));
     }
@@ -38,7 +38,7 @@ impl IRCMessage {
                 self.unhandled(state);
             }
             Message::Ping(token) => {
-                state.msg_sender.send(IRCMessage {
+                state.msg_sender.send(IrcMessage {
                     tags: None,
                     source: None,
                     message: Message::Pong(token.to_string()),

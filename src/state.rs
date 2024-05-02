@@ -9,7 +9,7 @@ use log::*;
 
 use crate::{
     channel::channel::Channel,
-    irc_message::IRCMessage,
+    irc_message::IrcMessage,
     ui::{keybinds::Action, term::TerminalUi, text::Line},
     util::Target,
 };
@@ -21,7 +21,7 @@ pub struct ClientState<'a> {
     all_targets: Vec<Target>,
     selected_target_idx: usize,
     status_messages: VecDeque<Line<'static>>,
-    pub msg_sender: Sender<IRCMessage>,
+    pub msg_sender: Sender<IrcMessage>,
 }
 
 #[derive(Debug)]
@@ -37,7 +37,7 @@ impl<'a> ClientState<'a> {
 
     pub fn new(
         addr: impl ToString,
-        msg_sender: Sender<IRCMessage>,
+        msg_sender: Sender<IrcMessage>,
         ui: TerminalUi<'a>,
         requested_nick: String,
     ) -> Self {

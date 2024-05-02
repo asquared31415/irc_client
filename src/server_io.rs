@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::{
     ext::{ReadWrite, WriteExt},
-    irc_message::{IRCMessage, IrcParseErr, MessageToStringErr},
+    irc_message::{IrcMessage, IrcParseErr, MessageToStringErr},
 };
 
 // the size of the receive buffer to allocate, in bytes.
@@ -53,7 +53,7 @@ impl ServerIo {
         }
     }
 
-    pub fn write(&mut self, msg: &IRCMessage) -> Result<(), MsgWriteErr> {
+    pub fn write(&mut self, msg: &IrcMessage) -> Result<(), MsgWriteErr> {
         let msg = msg.to_irc_string()?;
         // remove the \r\n when writing to the log file
         debug!("<- {:?}", &msg[..(msg.len() - 2)]);
@@ -62,7 +62,7 @@ impl ServerIo {
     }
 
     // returns Ok([msg, ...]) if a message was read and Err(e) if an error occurred
-    pub fn recv(&mut self) -> Result<Vec<IRCMessage>, MessagePollErr> {
+    pub fn recv(&mut self) -> Result<Vec<IrcMessage>, MessagePollErr> {
         const MAX_RETRIES: u8 = 5;
         let mut retry_count = 0;
         let count = loop {
@@ -123,7 +123,7 @@ impl ServerIo {
                 continue;
             }
 
-            let msg = IRCMessage::parse(msg_str.as_str())?;
+            let msg = IrcMessage::parse(msg_str.as_str())?;
             msgs.push(msg);
             debug!("-> {:?}", msg_str);
         }

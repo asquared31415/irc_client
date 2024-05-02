@@ -1,11 +1,11 @@
-use core::{
-    cmp,
-    fmt::{Debug, Display, Write as _},
-};
+use core::{cmp, fmt::Write as _};
 
 use thiserror::Error;
 
-use crate::{ext::StrExt as _, util::Target};
+use crate::{
+    irc_message::{param, Param},
+    util::Target,
+};
 
 // expects a parameter to be a string parameter, and extracts it, otherwise returns an invalid param
 // err.
@@ -17,133 +17,6 @@ macro_rules! expect_string_param {
             None => return Err(MessageParseErr::InvalidParams),
         }
     }};
-}
-
-#[derive(Clone)]
-pub struct Source(String);
-
-impl Source {
-    pub fn get_name(&self) -> &str {
-        self.0
-            .split_once('!')
-            .map(|(name, _)| name)
-            .unwrap_or(self.0.as_str())
-    }
-}
-
-impl Debug for Source {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if f.alternate() {
-            write!(f, "Source({:?})", self.get_name())
-        } else {
-            write!(f, "Source({:?})", self.0)
-        }
-    }
-}
-
-impl Display for Source {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.get_name())
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct IRCMessage {
-    pub tags: Option<()>,
-    pub source: Option<Source>,
-    pub message: Message,
-}
-
-impl IRCMessage {
-    /// parses a message from a string. the string must contain only a single message. the string
-    /// must not contain CRLF.
-    pub fn parse(s: &str) -> Result<Self, IrcParseErr> {
-        if s.contains("\r\n") {
-            return Err(IrcParseErr::InteriorCRLF);
-        }
-
-        // not sure if this is valid, but just in case, trim leading whitespace.
-        let mut s = s.trim_start_matches(' ');
-
-        // optional tags section
-        if s.starts_with('@') {
-            // TODO: tags
-            // if there is no space found, then the command part of the message is missing
-            let space = s.find(' ').ok_or(IrcParseErr::MissingCommand)?;
-            s = &s[space..];
-        }
-
-        // optional source section
-        let source = if let Some((_, rest)) = s.split_prefix(':') {
-            let Some((source, rest)) = rest.split_once(' ') else {
-                // if there's not a space after the source, the command is missing
-                return Err(IrcParseErr::MissingCommand);
-            };
-
-            s = rest;
-            Some(Source(source.to_string()))
-        } else {
-            None
-        };
-
-        s = s.trim_start_matches(' ');
-        if s.len() == 0 {
-            return Err(IrcParseErr::MissingCommand);
-        }
-
-        Ok(IRCMessage {
-            tags: None,
-            source,
-            message: Message::parse(s)?,
-        })
-    }
-
-    // turns this message into a string that can be sent across the IRC connection directly. the
-    // returned value includes the trailing CRLF that all messages must have.
-    pub fn to_irc_string(&self) -> Result<String, MessageToStringErr> {
-        let mut message = String::new();
-
-        if let Some(_tags) = self.tags {
-            todo!()
-        }
-
-        // clients must never send a source to the server
-        if self.source.is_some() {
-            return Err(MessageToStringErr::ClientMustNotSendSource);
-        }
-
-        message.push_str(self.message.to_string()?.as_str());
-        message.push_str("\r\n");
-        Ok(message)
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum IrcParseErr {
-    #[error("message contains interior CRLF")]
-    InteriorCRLF,
-    #[error("message is missing a command")]
-    MissingCommand,
-    #[error(transparent)]
-    MessageParseErr(#[from] MessageParseErr),
-}
-
-#[derive(Debug, Error)]
-pub enum MessageToStringErr {
-    #[error("clients may not create a {} message", .0)]
-    ClientMayNotCreate(String),
-    #[error("clients must not send a source with their messages")]
-    ClientMustNotSendSource,
-    #[error("message had invalid params")]
-    InvalidParams,
-}
-
-#[derive(Debug, Error)]
-pub enum MessageParseErr {
-    #[error("message {} missing params", .0)]
-    MissingParams(String),
-    #[error("message had invalid params")]
-    InvalidParams,
 }
 
 // FIXME: remove this once all variants can be constructed
@@ -267,13 +140,13 @@ impl Message {
     /// parses a Message from a string. the string must not contain leading spaces and must not
     /// contain a CRLF.
     /// only parses messages that can be sent from a server to a client!
-    fn parse(s: &str) -> Result<Self, MessageParseErr> {
+    pub(super) fn parse(s: &str) -> Result<Self, MessageParseErr> {
         let (command, args) = match s.split_once(' ') {
             Some(parts) => parts,
             // there was no space after the text, this is all one command
             None => (s, ""),
         };
-        let args = parse_params(args);
+        let args = param::parse_params(args);
 
         match command {
             "CAP" => {
@@ -492,7 +365,7 @@ impl Message {
         }
     }
 
-    fn to_string(&self) -> Result<String, MessageToStringErr> {
+    pub(super) fn to_irc_string(&self) -> Result<String, MessageToStringErr> {
         // FIXME: remove this!
         #[allow(unused)]
         //errors are returned early
@@ -623,78 +496,20 @@ impl Message {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum Param {
-    String(String),
-    List(Vec<String>),
+#[derive(Debug, Error)]
+pub enum MessageParseErr {
+    #[error("message {} missing params", .0)]
+    MissingParams(String),
+    #[error("message had invalid params")]
+    InvalidParams,
 }
 
-impl Param {
-    /// returns the param as a &str, if it was a normal string param
-    pub fn as_str(&self) -> Option<&str> {
-        match self {
-            Param::String(s) => Some(s),
-            Param::List(_) => None,
-        }
-    }
-
-    pub fn as_list(&self) -> Option<&[String]> {
-        match self {
-            Param::String(_) => None,
-            Param::List(list) => Some(list),
-        }
-    }
-
-    /// returns a vec containing the single string parameter, if the param is a string, or returns
-    /// the list parameter if the param is a list. this is useful for places where a list is
-    /// optional, like JOIN.
-    pub fn optional_list(&self) -> Vec<String> {
-        match self {
-            Param::String(s) => vec![s.to_string()],
-            Param::List(list) => list.to_owned(),
-        }
-    }
-
-    pub fn to_irc_string(&self) -> String {
-        match self {
-            Param::String(s) => s.to_owned(),
-            Param::List(args) => args.join(","),
-        }
-    }
-}
-
-fn parse_params(s: &str) -> Vec<Param> {
-    let mut params = vec![];
-
-    let mut s = s.trim_start_matches(' ');
-    while s.len() > 0 {
-        let end_idx = s.find(' ').unwrap_or(s.len());
-        let param = &s[..end_idx];
-
-        // NOTE: if a parameter starts with a `:`, the rest of the message is a parameter. the last
-        // parameter may omit the `:` if it's not necessary to disambiguate.
-        if param.starts_with(':') {
-            params.push(Param::String(s[1..].to_string()));
-            // ate the rest of the params, return early
-            return params;
-        } else if param.contains(',') {
-            let parts = param
-                .split(',')
-                .filter_map(|s| {
-                    if s.is_empty() {
-                        None
-                    } else {
-                        Some(s.to_string())
-                    }
-                })
-                .collect::<Vec<_>>();
-            params.push(Param::List(parts));
-        } else {
-            params.push(Param::String(param.to_string()));
-        }
-
-        s = s[end_idx..].trim_start_matches(' ');
-    }
-
-    params
+#[derive(Debug, Error)]
+pub enum MessageToStringErr {
+    #[error("clients may not create a {} message", .0)]
+    ClientMayNotCreate(String),
+    #[error("clients must not send a source with their messages")]
+    ClientMustNotSendSource,
+    #[error("message had invalid params")]
+    InvalidParams,
 }

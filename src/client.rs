@@ -22,7 +22,7 @@ use thiserror::Error;
 use crate::{
     command::Command,
     ext::*,
-    irc_message::{IRCMessage, Message},
+    irc_message::{IrcMessage, Message},
     server_io::ServerIo,
     state::{ClientState, ConnectedState, ConnectionState},
     ui::{
@@ -51,7 +51,7 @@ pub fn start(
     addr: &str,
     nick: &str,
     tls: bool,
-    init: impl Fn(&Sender<IRCMessage>) -> eyre::Result<()>,
+    init: impl Fn(&Sender<IrcMessage>) -> eyre::Result<()>,
 ) -> Result<!, ExitReason> {
     let Some((name, _)) = addr.split_once(':') else {
         return Err(eyre!("unable to determine host name for TLS"))?;
@@ -79,9 +79,9 @@ pub fn start(
     };
 
     // send to this channel to have a message written to the server
-    let (write_sender, write_receiver) = mpsc::channel::<IRCMessage>();
+    let (write_sender, write_receiver) = mpsc::channel::<IrcMessage>();
     // recv from this channel to get incoming messages from the server
-    let (msg_sender, msg_receiver) = mpsc::channel::<IRCMessage>();
+    let (msg_sender, msg_receiver) = mpsc::channel::<IrcMessage>();
 
     let layout = Layout {
         direction: Direction::Vertical,
@@ -233,7 +233,7 @@ enum InputErr {
 
 fn handle_input(
     state: &mut ClientState,
-    sender: &Sender<IRCMessage>,
+    sender: &Sender<IrcMessage>,
     input: &str,
 ) -> Result<(), InputErr> {
     // ui.debug(format!("input: {}", input))?;
@@ -280,7 +280,7 @@ fn handle_input(
 
             state.add_line(target.clone(), line);
             sender
-                .send(IRCMessage {
+                .send(IrcMessage {
                     tags: None,
                     source: None,
                     message: Message::Privmsg {
