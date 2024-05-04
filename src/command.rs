@@ -6,9 +6,10 @@ use log::*;
 use thiserror::Error;
 
 use crate::{
-    channel::{channel::Channel, ChannelName},
+    channel::{ChannelName, Nickname},
     irc_message::{IrcMessage, Message},
     state::{ClientState, ConnectedState, ConnectionState},
+    targets::Target,
 };
 
 macro_rules! expect_connected_state {
@@ -25,6 +26,8 @@ pub enum Command {
     Join(String),
     /// send raw text to the IRC server
     Raw(String),
+    /// start a private message with the specified user
+    Msg(Nickname),
     Quit,
 }
 
@@ -32,6 +35,8 @@ pub enum Command {
 pub enum CommandParseErr {
     #[error("command expected {} args, found {}", .0, .1)]
     IncorrectArgCount(u8, u8),
+    #[error("invalid argument {}, expected {}", .0, .1)]
+    InvalidArg(String, String),
     #[error("unknown command {}", .0)]
     UnknownCommand(String),
 }
@@ -73,6 +78,20 @@ impl Command {
 
                 Ok(Command::Raw(args_str.to_string()))
             }
+            "msg" => {
+                let &[nick] = args.as_slice() else {
+                    return Err(CommandParseErr::IncorrectArgCount(1, args.len() as u8));
+                };
+
+                let Some(nick) = Nickname::new(nick) else {
+                    return Err(CommandParseErr::InvalidArg(
+                        nick.to_string(),
+                        String::from("a nickname"),
+                    ));
+                };
+
+                Ok(Command::Msg(nick))
+            }
             "quit" => Ok(Command::Quit),
             _ => Err(CommandParseErr::UnknownCommand(cmd.to_string())),
         }
@@ -92,7 +111,7 @@ impl Command {
                     message: Message::Join(vec![(channel.to_string(), None)]),
                 })?;
 
-                state.join_channel(Channel::from_name(channel_name));
+                state.ensure_target_exists(Target::Channel(channel_name));
             }
             Command::Raw(text) => {
                 // don't need to access the state here, just need to ensure connected
@@ -103,6 +122,11 @@ impl Command {
                     source: None,
                     message: Message::Raw(text.to_string()),
                 })?;
+            }
+            Command::Msg(nick) => {
+                let ConnectedState { .. } = expect_connected_state!(state, "PRIVMSG")?;
+                // just create the channel and switch to it, no message
+                state.ensure_target_exists(Target::Nickname(nick.clone()));
             }
             Command::Quit => {
                 sender.send(IrcMessage {

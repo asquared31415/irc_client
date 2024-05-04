@@ -2,7 +2,7 @@ use crossterm::style::Stylize as _;
 use eyre::{bail, eyre};
 
 use crate::{
-    channel::{channel::Channel, ChannelName},
+    channel::{Channel, ChannelName, Nickname},
     irc_message::{IrcMessage, Message, Param, Source},
     state::{ClientState, ConnectedState, ConnectionState, NamesState, RegistrationState},
     targets::Target,
@@ -171,11 +171,22 @@ impl IrcMessage {
             }
             Message::Privmsg { targets, msg } => {
                 for target in targets {
+                    let mut target = target.clone();
+                    // adjust nickname targets to be the *sender* of the message instead of the
+                    // receiver (which is always the current user)
+                    if matches!(target, Target::Nickname(_)) {
+                        let Some(Source::Nick(nick, _, _)) = &self.source else {
+                            continue;
+                        };
+                        target = Target::Nickname(nick.clone());
+                    }
+
                     let mut line = util::line_now();
                     if let Some(source) = self.source.as_ref() {
                         line = line.join(create_nick_line(source.get_name(), false));
                     }
                     line = line.join(Line::from(msg.to_string()));
+
                     state.add_line(target.clone(), line);
                 }
             }

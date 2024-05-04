@@ -1,9 +1,6 @@
 use crate::{
-    channel::ChannelName,
-    constants::names::{
-        CHANNEL_MEMBERSHIP_PREFIXES, CHANNEL_TYPES, INVALID_NICKNAME_CHARACTERS,
-        INVALID_NICKNAME_START,
-    },
+    channel::{ChannelName, Nickname},
+    constants::names::CHANNEL_TYPES,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -21,30 +18,20 @@ impl Target {
             return None;
         };
 
-        // everything that starts with a channel type is a channel
+        // everything that starts with a channel type is a channel, everything else is a nick, if
+        // it's valid
         if CHANNEL_TYPES.contains(&first) {
-            return Some(Target::Channel(ChannelName::new(s)?));
-        }
-
-        if !INVALID_NICKNAME_START.contains(&first)
-            && !CHANNEL_MEMBERSHIP_PREFIXES.contains(&first)
-            && !s.chars().any(|c| INVALID_NICKNAME_CHARACTERS.contains(&c))
-        {
-            return Some(Target::Nickname(Nickname(s)));
+            Some(Target::Channel(ChannelName::new(s)?))
         } else {
-            return None;
+            Nickname::new(s).map(|n| Target::Nickname(n))
         }
     }
 
     pub fn as_str(&self) -> &str {
         match self {
             Target::Channel(channel_name) => channel_name.as_str(),
-            Target::Nickname(_) => todo!(),
+            Target::Nickname(nick) => nick.as_str(),
             Target::Status => "[STATUS]",
         }
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-/// the nickname of a user
-pub struct Nickname(String);

@@ -8,9 +8,9 @@ use crossterm::style::Stylize;
 use log::*;
 
 use crate::{
-    channel::{channel::Channel, ChannelName},
+    channel::{Channel, ChannelName, Nickname, UserMessages},
     irc_message::IrcMessage,
-    targets::{Nickname, Target},
+    targets::Target,
     ui::{keybinds::Action, term::TerminalUi, text::Line},
 };
 
@@ -52,24 +52,27 @@ impl<'a> ClientState<'a> {
         }
     }
 
-    pub fn addr(&self) -> &str {
-        self.addr.as_str()
-    }
-
     pub fn add_line(&mut self, target: Target, line: Line<'static>) {
-        let ConnectionState::Connected(ConnectedState { channels, .. }) = &mut self.conn_state
+        self.ensure_target_exists(target.clone());
+        let ConnectionState::Connected(ConnectedState {
+            channels,
+            user_messages,
+            ..
+        }) = &mut self.conn_state
         else {
             return;
         };
         match target {
             Target::Channel(channel_name) => {
-                let Some(channel) = channels.get_mut(&channel_name) else {
-                    warn!("could not add line to missing channel {:?}", channel_name);
-                    return;
-                };
+                // UNWRAP: `ensure_target_exists` called above
+                let channel = channels.get_mut(&channel_name).unwrap();
                 channel.messages.push_back(line);
             }
-            Target::Nickname(nick) => todo!(),
+            Target::Nickname(nick) => {
+                // UNWRAP: `ensure_target_exists` called above
+                let user_messages = user_messages.get_mut(&nick).unwrap();
+                user_messages.add_line(line);
+            }
             Target::Status => {
                 self.status_messages.push_back(line);
             }
@@ -111,19 +114,32 @@ impl<'a> ClientState<'a> {
         self.render();
     }
 
-    pub fn join_channel(&mut self, channel: Channel) {
+    pub fn ensure_target_exists(&mut self, target: Target) {
         match &mut self.conn_state {
-            ConnectionState::Registration(_) => todo!(),
-            ConnectionState::Connected(ConnectedState { channels, .. }) => {
-                let channel_name = channel.name();
-                if channels.contains_key(channel_name) {
-                    self.warn(format!("already joined channel {}", channel_name.as_str()));
-                } else {
-                    self.all_targets.push(Target::Channel(channel_name.clone()));
-                    self.selected_target_idx = self.all_targets.len() - 1;
-                    channels.insert(channel_name.clone(), channel);
-                }
+            ConnectionState::Registration { .. } => {
+                unreachable!("should not be joining a channel when not connected")
             }
+            ConnectionState::Connected(ConnectedState {
+                channels,
+                user_messages,
+                ..
+            }) => match target {
+                Target::Status => {}
+                Target::Channel(channel_name) => {
+                    if !channels.contains_key(&channel_name) {
+                        self.all_targets.push(Target::Channel(channel_name.clone()));
+                        self.selected_target_idx = self.all_targets.len() - 1;
+                        channels.insert(channel_name.clone(), Channel::from_name(channel_name));
+                    }
+                }
+                Target::Nickname(nick) => {
+                    if !user_messages.contains_key(&nick) {
+                        self.all_targets.push(Target::Nickname(nick.clone()));
+                        self.selected_target_idx = self.all_targets.len() - 1;
+                        user_messages.insert(nick.clone(), UserMessages::new(nick));
+                    }
+                }
+            },
         }
     }
 
@@ -177,7 +193,20 @@ impl<'a> ClientState<'a> {
 
                 Ok(())
             }
-            Target::Nickname(_) => todo!(),
+            Target::Nickname(nick) => {
+                let ConnectionState::Connected(ConnectedState { user_messages, .. }) =
+                    &mut self.conn_state
+                else {
+                    // just don't render if not connected
+                    return Ok(());
+                };
+
+                // UNWRAP: the nick cannot be selected if it's not in the target list
+                let msgs = user_messages.get(nick).unwrap();
+                self.ui.render(&status, msgs.iter_lines())?;
+
+                Ok(())
+            }
         }
     }
 
@@ -282,7 +311,15 @@ impl<'a> ClientState<'a> {
                     None
                 }
             }
-            Target::Nickname(_) => todo!(),
+            Target::Nickname(nick) => {
+                if let ConnectionState::Connected(ConnectedState { user_messages, .. }) =
+                    &mut self.conn_state
+                {
+                    user_messages.get_mut(nick).map(|c| &mut c.messages)
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -330,7 +367,7 @@ pub struct ConnectedState {
     /// currently connected channels
     pub channels: HashMap<ChannelName, Channel>,
     /// all users with which there exists a private message
-    pub user_messages: HashMap<Nickname, ()>,
+    pub user_messages: HashMap<Nickname, UserMessages>,
     pub messages_state: MessagesState,
 }
 

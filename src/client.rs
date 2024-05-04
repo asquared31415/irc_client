@@ -25,6 +25,7 @@ use crate::{
     irc_message::{IrcMessage, Message},
     server_io::ServerIo,
     state::{ClientState, ConnectedState, ConnectionState},
+    targets::Target,
     ui::{
         layout::{Direction, Layout, Section, SectionKind},
         term::TerminalUi,
@@ -265,12 +266,13 @@ fn handle_input(
             };
             let nick = nick.clone();
 
-            if channels.len() == 0 {
-                state.error(String::from("cannot send a message to 0 channels"));
+            let target = state.current_target().clone();
+            if target == Target::Status {
+                state.error(String::from("cannot send message to status"));
+                return Ok(());
             }
 
-            let target = state.current_target().clone();
-            trace!("sending to {:?}", target);
+            debug!("sending to {:?}", target);
             let line = util::line_now()
                 .push_unstyled("<")
                 .push(nick.to_string().cyan())

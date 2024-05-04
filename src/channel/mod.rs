@@ -1,7 +1,9 @@
-use crate::channel::channel::ChannelKind;
+mod channel;
+mod mode;
+mod user;
 
-pub mod channel;
-pub mod mode;
+pub use channel::{Channel, ChannelCreationErr, ChannelKind};
+pub use user::{Nickname, UserMessages};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 /// the name of a channel, including the channel type character (typically `#`)
