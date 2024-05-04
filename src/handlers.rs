@@ -2,12 +2,12 @@ use crossterm::style::Stylize as _;
 use eyre::{bail, eyre};
 
 use crate::{
-    channel::channel::Channel,
+    channel::{channel::Channel, ChannelName},
     irc_message::{IrcMessage, Message, Param, Source},
     state::{ClientState, ConnectedState, ConnectionState, NamesState, RegistrationState},
+    targets::Target,
     ui::text::Line,
     util,
-    util::Target,
 };
 
 macro_rules! expect_connected_state {
@@ -81,9 +81,9 @@ impl IrcMessage {
                             let line = util::line_now()
                                 .push(join_nick.magenta())
                                 .push(" joined ".green())
-                                .push(channel.name().dark_blue());
+                                .push(channel.name().as_str().dark_blue());
 
-                            state.add_line(channel.target(), line);
+                            state.add_line(Target::Channel(channel.name().clone()), line);
                         }
                     }
                     None => {
@@ -124,7 +124,7 @@ impl IrcMessage {
                 let Some(mode) = mode else {
                     state.warn_in(
                         &Target::Status,
-                        format!("server sent MODE for {} without modestr", target),
+                        format!("server sent MODE for {} without modestr", target.as_str()),
                     );
                     return Ok(());
                 };
@@ -143,10 +143,13 @@ impl IrcMessage {
 
                 match target {
                     Target::Channel(channel_name) => {
-                        let Some(channel) = channels.get_mut(target) else {
+                        let Some(channel) = channels.get_mut(channel_name) else {
                             state.warn_in(
                                 &Target::Status,
-                                format!("unexpected MODE for not joined channel {}", channel_name),
+                                format!(
+                                    "unexpected MODE for not joined channel {:?}",
+                                    channel_name
+                                ),
                             );
                             return Ok(());
                         };
@@ -453,7 +456,7 @@ impl IrcMessage {
                     state.warn_in(&Target::Status, String::from("RPL_ENDOFNAMES missing args"));
                     return Ok(());
                 };
-                let Some(channel_name) = channel.as_str() else {
+                let Some(name) = channel.as_str() else {
                     state.warn_in(
                         &Target::Status,
                         String::from("RPL_ENDOFNAMES malformed args"),
@@ -461,29 +464,28 @@ impl IrcMessage {
                     return Ok(());
                 };
 
-                let Some(target) = Target::new(channel_name) else {
+                let Some(channel_name) = ChannelName::new(name) else {
                     state.warn_in(
                         &Target::Status,
-                        format!("RPL_ENDOFNAMES invalid channel {:?}", channel_name),
+                        format!("RPL_ENDOFNAMES invalid channel {:?}", name),
                     );
                     return Ok(());
                 };
 
-                let Some(NamesState { names }) = messages_state.active_names.remove(channel_name)
-                else {
+                let Some(NamesState { names }) = messages_state.active_names.remove(name) else {
                     state.warn_in(
                         &Target::Status,
-                        format!("did not expect a RPL_ENDOFNAMES for {}", channel_name),
+                        format!("did not expect a RPL_ENDOFNAMES for {}", name),
                     );
                     return Ok(());
                 };
 
-                let Some(channel) = channels.get_mut(&target) else {
+                let Some(channel) = channels.get_mut(&channel_name) else {
                     state.warn_in(
                         &Target::Status,
                         format!(
                             "cannot update names for channel not joined: {}",
-                            channel_name
+                            channel_name.as_str()
                         ),
                     );
                     return Ok(());
@@ -492,13 +494,16 @@ impl IrcMessage {
                 channel.users.extend(names.iter().cloned());
 
                 state.add_line(
-                    target.clone(),
+                    Target::Channel(channel_name.clone()),
                     Line::default()
                         .push("NAMES".green())
                         .push_unstyled(" for ")
-                        .push(channel_name.blue()),
+                        .push(name.blue()),
                 );
-                state.add_line(target, Line::from(format!(" - {}", names.join(" "))));
+                state.add_line(
+                    Target::Channel(channel_name),
+                    Line::from(format!(" - {}", names.join(" "))),
+                );
             }
 
             // =======================

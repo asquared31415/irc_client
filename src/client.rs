@@ -28,10 +28,8 @@ use crate::{
     ui::{
         layout::{Direction, Layout, Section, SectionKind},
         term::TerminalUi,
-        text::Line,
     },
     util,
-    util::Target,
 };
 
 #[derive(Debug, Error)]

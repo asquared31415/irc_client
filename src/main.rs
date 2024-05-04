@@ -30,6 +30,7 @@ mod irc_message;
 mod logging;
 mod server_io;
 mod state;
+mod targets;
 mod ui;
 mod util;
 

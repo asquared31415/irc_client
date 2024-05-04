@@ -2,7 +2,7 @@ use std::collections::{HashSet, VecDeque};
 
 use thiserror::Error;
 
-use crate::{ui::text::Line, util::Target};
+use crate::{channel::ChannelName, ui::text::Line};
 
 #[derive(Debug, Error)]
 pub enum ChannelCreationErr {
@@ -16,9 +16,7 @@ pub enum ChannelCreationErr {
 pub struct Channel {
     // the name of the channel, **including** the channel kind prefix (so it is suitable for direct
     // use as a target)
-    name: String,
-    // the kind of the channel, determined by its name
-    kind: ChannelKind,
+    name: ChannelName,
     pub modes: String,
     topic: String,
     // TODO: represent users better, may need to be `HashSet<Arc<User>>`?
@@ -40,8 +38,7 @@ impl Channel {
             .ok_or_else(|| ChannelCreationErr::InvalidKind(name.clone()))?;
 
         Ok(Self {
-            name,
-            kind,
+            name: ChannelName { name, kind },
             modes: String::new(),
             topic: String::new(),
             users: HashSet::new(),
@@ -49,20 +46,22 @@ impl Channel {
         })
     }
 
-    pub fn from_target(target: &Target) -> Result<Self, ChannelCreationErr> {
-        Self::new(target.as_str())
+    pub fn from_name(name: ChannelName) -> Self {
+        Self {
+            name,
+            modes: String::new(),
+            topic: String::new(),
+            users: HashSet::new(),
+            messages: VecDeque::new(),
+        }
     }
 
-    pub fn name(&self) -> &str {
-        self.name.as_str()
-    }
-
-    pub fn target(&self) -> Target {
-        Target::Channel(self.name.clone())
+    pub fn name(&self) -> &ChannelName {
+        &self.name
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ChannelKind {
     // a standard `#` prefixed channel
     Regular,

@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     irc_message::{param, Param},
-    util::Target,
+    targets::Target,
 };
 
 // expects a parameter to be a string parameter, and extracts it, otherwise returns an invalid param

@@ -4,14 +4,14 @@ use std::{
     sync::mpsc::Sender,
 };
 
-use crossterm::style::{Color, Stylize};
+use crossterm::style::Stylize;
 use log::*;
 
 use crate::{
-    channel::channel::Channel,
+    channel::{channel::Channel, ChannelName},
     irc_message::IrcMessage,
+    targets::{Nickname, Target},
     ui::{keybinds::Action, term::TerminalUi, text::Line},
-    util::Target,
 };
 
 pub struct ClientState<'a> {
@@ -61,15 +61,18 @@ impl<'a> ClientState<'a> {
         else {
             return;
         };
-        if target == Target::Status {
-            self.status_messages.push_back(line);
-        } else {
-            let Some(channel) = channels.get_mut(&target) else {
-                warn!("could not add line to missing channel {:?}", target);
-                return;
-            };
-
-            channel.messages.push_back(line);
+        match target {
+            Target::Channel(channel_name) => {
+                let Some(channel) = channels.get_mut(&channel_name) else {
+                    warn!("could not add line to missing channel {:?}", channel_name);
+                    return;
+                };
+                channel.messages.push_back(line);
+            }
+            Target::Nickname(nick) => todo!(),
+            Target::Status => {
+                self.status_messages.push_back(line);
+            }
         }
 
         self.render();
@@ -112,13 +115,13 @@ impl<'a> ClientState<'a> {
         match &mut self.conn_state {
             ConnectionState::Registration(_) => todo!(),
             ConnectionState::Connected(ConnectedState { channels, .. }) => {
-                let target = channel.target();
-                if channels.contains_key(&target) {
-                    self.warn(format!("already joined channel {}", channel.name()));
+                let channel_name = channel.name();
+                if channels.contains_key(channel_name) {
+                    self.warn(format!("already joined channel {}", channel_name.as_str()));
                 } else {
-                    self.all_targets.push(target.clone());
+                    self.all_targets.push(Target::Channel(channel_name.clone()));
                     self.selected_target_idx = self.all_targets.len() - 1;
-                    channels.insert(target, channel);
+                    channels.insert(channel_name.clone(), channel);
                 }
             }
         }
@@ -152,15 +155,17 @@ impl<'a> ClientState<'a> {
             target: self.current_target().clone(),
         };
 
-        if target == &Target::Status {
-            self.ui.render(&status, self.status_messages.iter())?;
-            return Ok(());
-        }
+        match target {
+            Target::Status => self.ui.render(&status, self.status_messages.iter()),
+            Target::Channel(channel_name) => {
+                let ConnectionState::Connected(ConnectedState { channels, .. }) =
+                    &mut self.conn_state
+                else {
+                    // just don't render if not connected
+                    return Ok(());
+                };
 
-        match &mut self.conn_state {
-            ConnectionState::Registration(_) => Ok(()),
-            ConnectionState::Connected(ConnectedState { channels, .. }) => {
-                match channels.get(target) {
+                match channels.get(channel_name) {
                     Some(channel) => {
                         self.ui.render(&status, channel.messages.iter())?;
                     }
@@ -172,6 +177,7 @@ impl<'a> ClientState<'a> {
 
                 Ok(())
             }
+            Target::Nickname(_) => todo!(),
         }
     }
 
@@ -267,11 +273,11 @@ impl<'a> ClientState<'a> {
         };
         match target {
             Target::Status => Some(&mut self.status_messages),
-            Target::Channel(_) => {
+            Target::Channel(channel_name) => {
                 if let ConnectionState::Connected(ConnectedState { channels, .. }) =
                     &mut self.conn_state
                 {
-                    channels.get_mut(target).map(|c| &mut c.messages)
+                    channels.get_mut(channel_name).map(|c| &mut c.messages)
                 } else {
                     None
                 }
@@ -283,11 +289,11 @@ impl<'a> ClientState<'a> {
     fn lines_for(&mut self, target: &Target) -> Option<&mut VecDeque<Line<'static>>> {
         match target {
             Target::Status => Some(&mut self.status_messages),
-            Target::Channel(_) => {
+            Target::Channel(channel_name) => {
                 if let ConnectionState::Connected(ConnectedState { channels, .. }) =
                     &mut self.conn_state
                 {
-                    channels.get_mut(target).map(|c| &mut c.messages)
+                    channels.get_mut(channel_name).map(|c| &mut c.messages)
                 } else {
                     None
                 }
@@ -321,8 +327,10 @@ pub struct RegistrationState {
 #[derive(Debug)]
 pub struct ConnectedState {
     pub nick: String,
-    // currently connected channels
-    pub channels: HashMap<Target, Channel>,
+    /// currently connected channels
+    pub channels: HashMap<ChannelName, Channel>,
+    /// all users with which there exists a private message
+    pub user_messages: HashMap<Nickname, ()>,
     pub messages_state: MessagesState,
 }
 
@@ -331,6 +339,7 @@ impl ConnectedState {
         Self {
             nick,
             channels: HashMap::new(),
+            user_messages: HashMap::new(),
             messages_state: MessagesState {
                 active_names: HashMap::new(),
             },

@@ -176,7 +176,7 @@ impl<'a> TerminalUi<'a> {
         }
         status_line = status_line
             .push(format!(" {}", status.nick).with(NICK).on(STATUS_BG))
-            .push(format!(" - {}", status.target).on(STATUS_BG));
+            .push(format!(" - {}", status.target.as_str()).on(STATUS_BG));
 
         let pad = usize::from(status_rect.width).saturating_sub(unicode_width::display_width(
             status_line.fmt_unstyled().as_str(),
