@@ -8,7 +8,7 @@ use crossterm::{
     cursor, execute,
     style::{ContentStyle, StyledContent},
 };
-use log::trace;
+use log::*;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{ui::layout::Rect, util::unicode_width};
@@ -33,6 +33,11 @@ impl<'a> Line<'a> {
             style: ContentStyle::default(),
             content: Box::new(content),
         });
+        self
+    }
+
+    pub fn join<'other: 'a>(mut self, other: Line<'other>) -> Self {
+        self.content.extend(other.content);
         self
     }
 

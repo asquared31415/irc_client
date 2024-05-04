@@ -2,9 +2,25 @@ pub mod unicode_width;
 
 use core::fmt::Display;
 
-use crate::constants::names::{
-    CHANNEL_MEMBERSHIP_PREFIXES, CHANNEL_TYPES, INVALID_NICKNAME_CHARACTERS, INVALID_NICKNAME_START,
+use crossterm::style::Stylize;
+
+use crate::{
+    constants::names::{
+        CHANNEL_MEMBERSHIP_PREFIXES, CHANNEL_TYPES, INVALID_NICKNAME_CHARACTERS,
+        INVALID_NICKNAME_START,
+    },
+    ui::text::Line,
 };
+
+pub fn line_now() -> Line<'static> {
+    const FMT: &str = "%H:%M:%S";
+    let now = chrono::Local::now();
+
+    Line::default()
+        .push_unstyled("[")
+        .push(now.format(FMT).to_string().red())
+        .push_unstyled("]")
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Target {

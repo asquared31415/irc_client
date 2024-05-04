@@ -30,6 +30,7 @@ use crate::{
         term::TerminalUi,
         text::Line,
     },
+    util,
     util::Target,
 };
 
@@ -272,9 +273,9 @@ fn handle_input(
 
             let target = state.current_target().clone();
             trace!("sending to {:?}", target);
-            let line = Line::default()
+            let line = util::line_now()
                 .push_unstyled("<")
-                .push(nick.to_string().magenta().bold())
+                .push(nick.to_string().cyan())
                 .push_unstyled(">")
                 .push_unstyled(input);
 

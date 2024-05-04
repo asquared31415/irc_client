@@ -6,6 +6,7 @@ use crate::{
     irc_message::{IrcMessage, Message, Param, Source},
     state::{ClientState, ConnectedState, ConnectionState, NamesState, RegistrationState},
     ui::text::Line,
+    util,
     util::Target,
 };
 
@@ -52,7 +53,7 @@ impl IrcMessage {
                 let reason = reason.as_deref().unwrap_or("disconnected");
                 state.add_line(
                     Target::Status,
-                    Line::default()
+                    util::line_now()
                         .push(name.magenta())
                         .push_unstyled(" quit: ")
                         .push_unstyled(reason),
@@ -77,7 +78,7 @@ impl IrcMessage {
                             .collect::<Vec<_>>();
 
                         for channel in join_channels.into_iter() {
-                            let line = Line::default()
+                            let line = util::line_now()
                                 .push(join_nick.magenta())
                                 .push(" joined ".green())
                                 .push(channel.name().dark_blue());
@@ -104,7 +105,7 @@ impl IrcMessage {
                         });
 
                 for channel in channels {
-                    let mut line = Line::default().push(name.magenta()).push_unstyled(" left");
+                    let mut line = util::line_now().push(name.magenta()).push_unstyled(" left");
                     // reasons are entirely optional
                     if let Some(reason) = reason {
                         line = line.push_unstyled(format!(": {}", reason));
@@ -167,28 +168,21 @@ impl IrcMessage {
             }
             Message::Privmsg { targets, msg } => {
                 for target in targets {
-                    let mut line = if let Some(source) = self.source.as_ref() {
-                        create_nick_line(source.get_name(), false)
-                    } else {
-                        Line::default()
-                    };
-                    line.extend(Line::default().push_unstyled(msg).into_iter());
+                    let mut line = util::line_now();
+                    if let Some(source) = self.source.as_ref() {
+                        line = line.join(create_nick_line(source.get_name(), false));
+                    }
+                    line = line.join(Line::from(msg.to_string()));
                     state.add_line(target.clone(), line);
                 }
             }
             Message::Notice { targets, msg } => {
                 for target in targets {
-                    let mut line = if let Some(source) = self.source.as_ref() {
-                        create_nick_line(source.get_name(), false)
-                    } else {
-                        Line::default()
-                    };
-                    line.extend(
-                        Line::default()
-                            .push("NOTICE ".green())
-                            .push_unstyled(msg)
-                            .into_iter(),
-                    );
+                    let mut line = util::line_now();
+                    if let Some(source) = self.source.as_ref() {
+                        line = line.join(create_nick_line(source.get_name(), false));
+                    }
+                    line = line.join(Line::default().push("NOTICE ".green()).push_unstyled(msg));
                     state.add_line(target.clone(), line);
                 }
             }
