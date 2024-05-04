@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use log::debug;
+use log::*;
 use thiserror::Error;
 
 use crate::{
@@ -43,7 +43,7 @@ impl IrcMessage {
 
             s = rest;
             let source = Source::parse(source);
-            debug!("parsed source: {:#?}", source);
+            trace!("parsed source: {:#?}", source);
             Some(source)
         } else {
             None
