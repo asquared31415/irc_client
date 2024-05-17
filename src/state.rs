@@ -52,6 +52,10 @@ impl<'a> ClientState<'a> {
         }
     }
 
+    pub fn send_msg(&self, msg: IrcMessage) {
+        let _ = self.msg_sender.send(msg);
+    }
+
     pub fn add_line(&mut self, target: Target, line: Line<'static>) {
         self.ensure_target_exists(target.clone());
         let ConnectionState::Connected(ConnectedState {
@@ -148,30 +152,24 @@ impl<'a> ClientState<'a> {
     }
 
     pub fn render(&mut self) -> eyre::Result<()> {
-        let target = match self.all_targets.get(self.selected_target_idx) {
-            Some(target) => target,
-            None => {
-                self.selected_target_idx = ClientState::TARGET_STATUS_IDX;
-                &Target::Status
-            }
-        };
-        trace!("rendering for {:?}", target);
-
         let (registered, nick) = match &mut self.conn_state {
             ConnectionState::Registration(RegistrationState { requested_nick }) => {
-                (false, requested_nick)
+                (false, requested_nick.clone())
             }
-            ConnectionState::Connected(ConnectedState { nick, .. }) => (true, nick),
+            ConnectionState::Connected(ConnectedState { nick, .. }) => (true, nick.clone()),
         };
+
+        let target = self.current_target().clone();
+        trace!("rendering for {:?}", target);
 
         let status = StatusInfo {
             addr: self.addr.clone(),
             registered,
-            nick: nick.clone(),
-            target: self.current_target().clone(),
+            nick,
+            target: target.clone(),
         };
 
-        match target {
+        match &target {
             Target::Status => self.ui.render(&status, self.status_messages.iter()),
             Target::Channel(channel_name) => {
                 let ConnectionState::Connected(ConnectedState { channels, .. }) =

@@ -465,7 +465,23 @@ impl Message {
 
                 format!("PRIVMSG {} :{}", target_str, msg)
             }
-            Message::Notice { targets, msg: text } => todo!(),
+            Message::Notice { targets, msg } => {
+                let mut target_str = String::new();
+                match targets.as_slice() {
+                    [] => {
+                        return Err(MessageToStringErr::InvalidParams);
+                    }
+                    [start @ .., last] => {
+                        for target in start {
+                            // UNWRAP: writing to a string is infallible
+                            write!(&mut target_str, "{},", target.as_str()).unwrap();
+                        }
+                        target_str.push_str(last.as_str());
+                    }
+                }
+
+                format!("NOTICE {} :{}", target_str, msg)
+            }
             Message::Who { mask } => todo!(),
             Message::Whois { target, nick } => todo!(),
             Message::WhoWas { nick, count } => todo!(),

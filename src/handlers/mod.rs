@@ -2,13 +2,16 @@ use crossterm::style::Stylize as _;
 use eyre::{bail, eyre};
 
 use crate::{
-    channel::{Channel, ChannelName, Nickname},
+    channel::{Channel, ChannelName},
     irc_message::{IrcMessage, Message, Param, Source},
     state::{ClientState, ConnectedState, ConnectionState, NamesState, RegistrationState},
     targets::Target,
     ui::text::Line,
     util,
 };
+
+pub mod ctcp;
+mod msg;
 
 macro_rules! expect_connected_state {
     ($state:expr, $msg:expr) => {
@@ -171,33 +174,24 @@ impl IrcMessage {
             }
             Message::Privmsg { targets, msg } => {
                 for target in targets {
-                    let mut target = target.clone();
-                    // adjust nickname targets to be the *sender* of the message instead of the
-                    // receiver (which is always the current user)
-                    if matches!(target, Target::Nickname(_)) {
-                        let Some(Source::Nick(nick, _, _)) = &self.source else {
-                            continue;
-                        };
-                        target = Target::Nickname(nick.clone());
-                    }
-
-                    let mut line = util::line_now();
-                    if let Some(source) = self.source.as_ref() {
-                        line = line.join(create_nick_line(source.get_name(), false));
-                    }
-                    line = line.join(Line::from(msg.to_string()));
-
-                    state.add_line(target.clone(), line);
+                    msg::handle_message(
+                        state,
+                        msg::MessageKind::Privmsg,
+                        &self.source,
+                        &target,
+                        msg.as_str(),
+                    );
                 }
             }
             Message::Notice { targets, msg } => {
                 for target in targets {
-                    let mut line = util::line_now();
-                    if let Some(source) = self.source.as_ref() {
-                        line = line.join(create_nick_line(source.get_name(), false));
-                    }
-                    line = line.join(Line::default().push("NOTICE ".green()).push_unstyled(msg));
-                    state.add_line(target.clone(), line);
+                    msg::handle_message(
+                        state,
+                        msg::MessageKind::Notice,
+                        &self.source,
+                        &target,
+                        msg.as_str(),
+                    );
                 }
             }
             Message::Kill { .. } => {
@@ -639,16 +633,4 @@ impl IrcMessage {
 
         Ok(())
     }
-}
-
-fn create_nick_line(nick: &str, me: bool) -> Line<'static> {
-    let nick = if me {
-        nick.to_string().magenta().bold()
-    } else {
-        nick.to_string().magenta()
-    };
-    Line::default()
-        .push_unstyled("<")
-        .push(nick)
-        .push_unstyled(">")
 }

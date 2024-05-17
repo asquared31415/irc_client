@@ -274,9 +274,7 @@ fn handle_input(
 
             debug!("sending to {:?}", target);
             let line = util::line_now()
-                .push_unstyled("<")
-                .push(nick.to_string().cyan())
-                .push_unstyled(">")
+                .join(util::message_nick_line(nick.as_str(), true))
                 .push_unstyled(input);
 
             state.add_line(target.clone(), line);

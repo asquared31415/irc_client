@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use crate::{
     channel::{ChannelName, Nickname},
+    handlers::ctcp::CtcpCommand,
     irc_message::{IrcMessage, Message},
     state::{ClientState, ConnectedState, ConnectionState},
     targets::Target,
@@ -24,6 +25,7 @@ macro_rules! expect_connected_state {
 #[derive(Debug)]
 pub enum Command {
     Join(String),
+    Ctcp(Target, String),
     /// send raw text to the IRC server
     Raw(String),
     /// start a private message with the specified user
@@ -43,14 +45,14 @@ pub enum CommandParseErr {
 
 impl Command {
     pub fn parse<S: AsRef<str>>(s: S) -> Result<Self, CommandParseErr> {
-        let s = s.as_ref().to_lowercase();
-        let (cmd, args_str) = s.split_once(' ').unwrap_or((s.as_str(), ""));
+        let s = s.as_ref();
+        let (cmd, args_str) = s.split_once(' ').unwrap_or((s, ""));
         let args = args_str
             .split(' ')
             .filter(|s| !s.is_empty())
             .collect::<Vec<_>>();
 
-        match cmd {
+        match cmd.to_lowercase().as_str() {
             "join" => {
                 if args.len() != 1 {
                     return Err(CommandParseErr::IncorrectArgCount(1, args.len() as u8));
@@ -113,6 +115,9 @@ impl Command {
 
                 state.ensure_target_exists(Target::Channel(channel_name));
             }
+            Command::Ctcp(target, command) => {
+                todo!("handle CTCP command from user")
+            }
             Command::Raw(text) => {
                 // don't need to access the state here, just need to ensure connected
                 let _ = expect_connected_state!(state, "RAW")?;
@@ -125,8 +130,10 @@ impl Command {
             }
             Command::Msg(nick) => {
                 let ConnectedState { .. } = expect_connected_state!(state, "PRIVMSG")?;
+                debug!("nick: {:?}", nick);
                 // just create the channel and switch to it, no message
                 state.ensure_target_exists(Target::Nickname(nick.clone()));
+                state.render()?;
             }
             Command::Quit => {
                 sender.send(IrcMessage {

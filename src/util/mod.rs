@@ -13,3 +13,18 @@ pub fn line_now() -> Line<'static> {
         .push(now.format(FMT).to_string().red())
         .push_unstyled("]")
 }
+
+pub fn message_nick_line(nick: &str, me: bool) -> Line<'static> {
+    Line::default()
+        .push_unstyled("<")
+        .join(nick_line(nick, me))
+        .push_unstyled(">")
+}
+
+pub fn nick_line(nick: &str, me: bool) -> Line<'static> {
+    if me {
+        Line::default().push(nick.to_string().cyan())
+    } else {
+        Line::default().push(nick.to_string().magenta())
+    }
+}
