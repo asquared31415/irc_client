@@ -28,7 +28,7 @@ mod ext;
 mod handlers;
 mod irc_message;
 mod logging;
-mod server_io;
+mod net;
 mod state;
 mod targets;
 mod ui;

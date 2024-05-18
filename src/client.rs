@@ -13,7 +13,6 @@ use std::{
     thread,
 };
 
-use crossterm::style::Stylize as _;
 use eyre::{bail, eyre, Context};
 use log::*;
 use rustls::{pki_types::ServerName, ClientConfig, ClientConnection, RootCertStore, StreamOwned};
@@ -23,7 +22,7 @@ use crate::{
     command::Command,
     ext::*,
     irc_message::{IrcMessage, Message},
-    server_io::ServerIo,
+    net::ServerIo,
     state::{ClientState, ConnectedState, ConnectionState},
     targets::Target,
     ui::{
@@ -166,13 +165,12 @@ pub fn start(
                     return;
                 }
 
-                let input = || -> Result<(), InputErr> {
+                let input = || -> eyre::Result<()> {
                     let state = &mut *state.lock().unwrap();
                     // note: this re-renders if needed
-                    match state.input() {
-                        Ok(Some(input)) => handle_input(state, &queue_sender, input.as_str()),
-                        Ok(None) => Ok(()),
-                        Err(e) => Err(e.into()),
+                    match state.input()? {
+                        Some(input) => handle_input(state, &queue_sender, input.as_str()),
+                        None => Ok(()),
                     }
                 }();
 
@@ -186,11 +184,7 @@ pub fn start(
                         const INPUT_POLL_DELAY: Duration = Duration::from_millis(10);
                         thread::sleep(INPUT_POLL_DELAY);
                     }
-                    Err(InputErr::Io(e)) => {
-                        state.lock().unwrap().ui.error(e.to_string()).unwrap();
-                        return;
-                    }
-                    Err(InputErr::Other(e)) => {
+                    Err(e) => {
                         state.lock().unwrap().ui.error(e.to_string()).unwrap();
                         return;
                     }
@@ -222,20 +216,11 @@ pub fn start(
     }
 }
 
-/// describes **fatal** errors in input handling.
-#[derive(Debug, Error)]
-enum InputErr {
-    #[error(transparent)]
-    Io(io::Error),
-    #[error(transparent)]
-    Other(#[from] eyre::Report),
-}
-
 fn handle_input(
     state: &mut ClientState,
     sender: &Sender<IrcMessage>,
     input: &str,
-) -> Result<(), InputErr> {
+) -> eyre::Result<()> {
     // ui.debug(format!("input: {}", input))?;
 
     match input.split_prefix('/') {
@@ -257,8 +242,7 @@ fn handle_input(
             }
         },
         None => {
-            let ConnectionState::Connected(ConnectedState { nick, channels, .. }) =
-                &mut state.conn_state
+            let ConnectionState::Connected(ConnectedState { nick, .. }) = &mut state.conn_state
             else {
                 state.error(String::from("cannot send message when not registered"));
                 // this is not a fatal error, it likely means that the connection was slow
