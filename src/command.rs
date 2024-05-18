@@ -7,8 +7,7 @@ use thiserror::Error;
 
 use crate::{
     channel::{ChannelName, Nickname},
-    handlers::ctcp::CtcpCommand,
-    irc_message::{IrcMessage, Message},
+    irc::{IrcCommand, IrcMessage},
     state::{ClientState, ConnectedState, ConnectionState},
     targets::Target,
 };
@@ -107,11 +106,10 @@ impl Command {
                 let channel_name = ChannelName::new(channel)
                     .ok_or_else(|| eyre!("join was invalid channel {:?}", channel))?;
 
-                sender.send(IrcMessage {
-                    tags: None,
-                    source: None,
-                    message: Message::Join(vec![(channel.to_string(), None)]),
-                })?;
+                sender.send(IrcMessage::from_command(IrcCommand::Join(vec![(
+                    channel.to_string(),
+                    None,
+                )])))?;
 
                 state.ensure_target_exists(Target::Channel(channel_name));
             }
@@ -122,11 +120,7 @@ impl Command {
                 // don't need to access the state here, just need to ensure connected
                 let _ = expect_connected_state!(state, "RAW")?;
 
-                sender.send(IrcMessage {
-                    tags: None,
-                    source: None,
-                    message: Message::Raw(text.to_string()),
-                })?;
+                sender.send(IrcMessage::from_command(IrcCommand::Raw(text.to_string())))?;
             }
             Command::Msg(nick) => {
                 let ConnectedState { .. } = expect_connected_state!(state, "PRIVMSG")?;
@@ -136,11 +130,7 @@ impl Command {
                 state.render()?;
             }
             Command::Quit => {
-                sender.send(IrcMessage {
-                    tags: None,
-                    source: None,
-                    message: Message::Quit(None),
-                })?;
+                sender.send(IrcMessage::from_command(IrcCommand::Quit(None)))?;
                 crate::client::QUIT_REQUESTED.store(true, atomic::Ordering::Relaxed);
             }
         }

@@ -1,10 +1,8 @@
-use core::fmt::Display;
-
 use log::*;
 
 use crate::{
     channel::Nickname,
-    irc_message::{IrcMessage, Message},
+    irc::{IrcCommand, IrcMessage},
     targets::Target,
 };
 
@@ -22,14 +20,10 @@ pub enum CtcpCommand {
 
 impl CtcpCommand {
     pub fn to_msg(self, targets: Vec<Target>) -> IrcMessage {
-        IrcMessage {
-            tags: None,
-            source: None,
-            message: Message::Privmsg {
-                targets,
-                msg: self.irc_string(),
-            },
-        }
+        IrcMessage::from_command(IrcCommand::Privmsg {
+            targets,
+            msg: self.irc_string(),
+        })
     }
 
     fn irc_string(&self) -> String {
@@ -99,14 +93,10 @@ pub enum CtcpReply {
 
 impl CtcpReply {
     pub fn to_msg(self, nick: &Nickname) -> IrcMessage {
-        IrcMessage {
-            tags: None,
-            source: None,
-            message: Message::Notice {
-                targets: vec![Target::Nickname(nick.clone())],
-                msg: self.as_irc_str(),
-            },
-        }
+        IrcMessage::from_command(IrcCommand::Notice {
+            targets: vec![Target::Nickname(nick.clone())],
+            msg: self.as_irc_str(),
+        })
     }
 
     fn as_irc_str(&self) -> String {

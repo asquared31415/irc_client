@@ -3,7 +3,7 @@ use log::*;
 
 use crate::{
     handlers::ctcp::{self, CtcpCommand, CtcpReply, CTCP_DELIM},
-    irc_message::Source,
+    irc::Source,
     state::ClientState,
     targets::Target,
     ui::text::Line,

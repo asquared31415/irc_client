@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::{
     ext::{ReadWrite, WriteExt},
-    irc_message::{IrcMessage, IrcParseErr, MessageToStringErr},
+    irc::{IrcCommandToStringErr, IrcMessage, IrcParseErr},
 };
 
 // the size of the receive buffer to allocate, in bytes.
@@ -27,7 +27,7 @@ pub enum MessagePollErr {
 #[derive(Debug, Error)]
 pub enum MsgWriteErr {
     #[error(transparent)]
-    MessageToStrErr(#[from] MessageToStringErr),
+    MessageToStrErr(#[from] IrcCommandToStringErr),
     #[error(transparent)]
     Io(#[from] io::Error),
 }

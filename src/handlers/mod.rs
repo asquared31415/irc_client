@@ -3,7 +3,7 @@ use eyre::{bail, eyre};
 
 use crate::{
     channel::{Channel, ChannelName},
-    irc_message::{IrcMessage, Message, Param, Source},
+    irc::{IrcCommand, IrcMessage, Param, Source},
     state::{ClientState, ConnectedState, ConnectionState, NamesState, RegistrationState},
     targets::Target,
     ui::text::Line,
@@ -32,23 +32,23 @@ impl IrcMessage {
     pub fn handle(&self, state: &mut ClientState) -> eyre::Result<()> {
         use crate::constants::numerics::*;
         match &self.message {
-            Message::Cap => {
+            IrcCommand::Cap => {
                 self.unhandled(state);
             }
-            Message::Authenticate => {
+            IrcCommand::Authenticate => {
                 self.unhandled(state);
             }
-            Message::Nick(_) => {
+            IrcCommand::Nick(_) => {
                 self.unhandled(state);
             }
-            Message::Ping(token) => {
-                state.msg_sender.send(IrcMessage {
-                    tags: None,
-                    source: None,
-                    message: Message::Pong(token.to_string()),
-                })?;
+            IrcCommand::Ping(token) => {
+                state
+                    .msg_sender
+                    .send(IrcMessage::from_command(IrcCommand::Pong(
+                        token.to_string(),
+                    )))?;
             }
-            Message::Quit(reason) => {
+            IrcCommand::Quit(reason) => {
                 let Some(name) = self.source.as_ref().map(Source::get_name) else {
                     bail!("QUIT msg had no source");
                 };
@@ -62,7 +62,7 @@ impl IrcMessage {
                         .push_unstyled(reason),
                 );
             }
-            Message::Join(join_channels) => {
+            IrcCommand::Join(join_channels) => {
                 let ClientState {
                     conn_state: ConnectionState::Connected(ConnectedState { .. }),
                     ..
@@ -94,7 +94,7 @@ impl IrcMessage {
                     }
                 }
             }
-            Message::Part(channels, reason) => {
+            IrcCommand::Part(channels, reason) => {
                 let Some(name) = self.source.as_ref().map(Source::get_name) else {
                     bail!("PART msg had no source");
                 };
@@ -117,13 +117,13 @@ impl IrcMessage {
                     state.add_line(channel, line);
                 }
             }
-            Message::Invite { .. } => {
+            IrcCommand::Invite { .. } => {
                 self.unhandled(state);
             }
-            Message::Kick { .. } => {
+            IrcCommand::Kick { .. } => {
                 self.unhandled(state);
             }
-            Message::Mode { target, mode } => {
+            IrcCommand::Mode { target, mode } => {
                 let Some(mode) = mode else {
                     state.warn_in(
                         &Target::Status,
@@ -172,7 +172,7 @@ impl IrcMessage {
                     }
                 }
             }
-            Message::Privmsg { targets, msg } => {
+            IrcCommand::Privmsg { targets, msg } => {
                 for target in targets {
                     msg::handle_message(
                         state,
@@ -183,7 +183,7 @@ impl IrcMessage {
                     );
                 }
             }
-            Message::Notice { targets, msg } => {
+            IrcCommand::Notice { targets, msg } => {
                 for target in targets {
                     msg::handle_message(
                         state,
@@ -194,7 +194,7 @@ impl IrcMessage {
                     );
                 }
             }
-            Message::Kill { .. } => {
+            IrcCommand::Kill { .. } => {
                 self.unhandled(state);
             }
 
@@ -207,7 +207,7 @@ impl IrcMessage {
             // =========================================
             // =========================================
             // =========================================
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: RPL_WELCOME,
                 args,
             } => {
@@ -246,7 +246,7 @@ impl IrcMessage {
                 state.add_line(Target::Status, Line::from(text.to_string()));
             }
 
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: RPL_YOURHOST,
                 args,
             } => {
@@ -258,7 +258,7 @@ impl IrcMessage {
                 };
                 state.add_line(Target::Status, Line::from(text.to_string()));
             }
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: RPL_CREATED,
                 args,
             } => {
@@ -270,7 +270,7 @@ impl IrcMessage {
                 };
                 state.add_line(Target::Status, Line::from(text.to_string()));
             }
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: RPL_MYINFO,
                 args,
             } => {
@@ -284,14 +284,14 @@ impl IrcMessage {
                     .join(" ");
                 state.add_line(Target::Status, Line::from(text));
             }
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: RPL_ISUPPORT,
                 args: _,
             } => {
                 //TODO: do we care about this?
             }
 
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: RPL_LUSERCLIENT,
                 args,
             } => {
@@ -299,7 +299,7 @@ impl IrcMessage {
                     state.add_line(Target::Status, Line::from(msg.to_string()));
                 }
             }
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: RPL_LUSEROP,
                 args,
             } => {
@@ -317,7 +317,7 @@ impl IrcMessage {
 
                 state.add_line(Target::Status, Line::from(format!("{} {}", ops, msg)));
             }
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: RPL_LUSERUNKNOWN,
                 args,
             } => {
@@ -342,7 +342,7 @@ impl IrcMessage {
                     Line::from(format!("{} {}", connections, msg)),
                 );
             }
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: RPL_LUSERCHANNELS,
                 args,
             } => {
@@ -363,7 +363,7 @@ impl IrcMessage {
 
                 state.add_line(Target::Status, Line::from(format!("{} {}", channels, msg)));
             }
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: RPL_LUSERME,
                 args,
             } => {
@@ -371,7 +371,7 @@ impl IrcMessage {
                     state.add_line(Target::Status, Line::from(msg.to_string()));
                 }
             }
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: RPL_LOCALUSERS,
                 args,
             } => {
@@ -379,7 +379,7 @@ impl IrcMessage {
                     state.add_line(Target::Status, Line::from(msg.to_string()));
                 }
             }
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: RPL_GLOBALUSERS,
                 args,
             } => {
@@ -391,7 +391,7 @@ impl IrcMessage {
             // =======================
             // MOTD
             // =======================
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: ERR_NOMOTD,
                 args,
             } => {
@@ -407,7 +407,7 @@ impl IrcMessage {
                 );
             }
 
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: RPL_MOTDSTART | RPL_MOTD | RPL_ENDOFMOTD,
                 args,
             } => {
@@ -420,7 +420,7 @@ impl IrcMessage {
             // =======================
             // names
             // =======================
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: RPL_NAMREPLY,
                 args,
             } => {
@@ -448,7 +448,7 @@ impl IrcMessage {
                         .filter_map(|p| p.as_str().map(str::to_string)),
                 );
             }
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: RPL_ENDOFNAMES,
                 args,
             } => {
@@ -514,7 +514,7 @@ impl IrcMessage {
             // =======================
             // modes
             // =======================
-            Message::Numeric {
+            IrcCommand::Numeric {
                 num: RPL_UMODEIS, ..
             } => {
                 self.unhandled(state);
@@ -529,16 +529,16 @@ impl IrcMessage {
             // =========================================
             // =========================================
             // =========================================
-            Message::Numeric { .. } => {
+            IrcCommand::Numeric { .. } => {
                 self.unhandled(state);
             }
 
-            Message::Unknown { .. } => {
+            IrcCommand::Unknown { .. } => {
                 state.warn_in(&Target::Status, format!("unhandled unknown msg {:?}", self));
             }
 
             // fatal error, the connection will be terminated
-            Message::Error(err) => {
+            IrcCommand::Error(err) => {
                 state.ui.error(err)?;
             }
 
@@ -551,80 +551,80 @@ impl IrcMessage {
             // ==============================================
             // ==============================================
             // ==============================================
-            Message::Pass { .. } => {
+            IrcCommand::Pass { .. } => {
                 state.warn(String::from("client received PASS"));
             }
-            Message::User { .. } => {
+            IrcCommand::User { .. } => {
                 state.warn(String::from("client received USER"));
             }
-            Message::Pong { .. } => {
+            IrcCommand::Pong { .. } => {
                 state.warn(String::from("client received PONG"));
             }
-            Message::Oper => {
+            IrcCommand::Oper => {
                 state.warn(String::from("client received OPER"));
             }
-            Message::Topic { .. } => {
+            IrcCommand::Topic { .. } => {
                 state.warn(String::from("client received TOPIC"));
             }
-            Message::Names { .. } => {
+            IrcCommand::Names { .. } => {
                 state.warn(String::from("client received NAMES"));
             }
-            Message::List => {
+            IrcCommand::List => {
                 state.warn(String::from("client received LIST"));
             }
-            Message::Motd { .. } => {
+            IrcCommand::Motd { .. } => {
                 state.warn(String::from("client received MOTD"));
             }
-            Message::Version { .. } => {
+            IrcCommand::Version { .. } => {
                 state.warn(String::from("client received VERSION"));
             }
 
-            Message::Admin { .. } => {
+            IrcCommand::Admin { .. } => {
                 state.warn(String::from("client received ADMIN"));
             }
-            Message::Connect { .. } => {
+            IrcCommand::Connect { .. } => {
                 state.warn(String::from("client received CONNECT"));
             }
-            Message::Lusers => {
+            IrcCommand::Lusers => {
                 state.warn(String::from("client received LUSERS"));
             }
-            Message::Time { .. } => {
+            IrcCommand::Time { .. } => {
                 state.warn(String::from("client received TIME"));
             }
-            Message::Stats { .. } => {
+            IrcCommand::Stats { .. } => {
                 state.warn(String::from("client received STATS"));
             }
-            Message::Help { .. } => {
+            IrcCommand::Help { .. } => {
                 state.warn(String::from("client received HELP"));
             }
-            Message::Info => {
+            IrcCommand::Info => {
                 state.warn(String::from("client received INFO"));
             }
-            Message::Who { .. } => {
+            IrcCommand::Who { .. } => {
                 state.warn(String::from("client received WHO"));
             }
-            Message::Whois { .. } => {
+            IrcCommand::Whois { .. } => {
                 state.warn(String::from("client received WHOIS"));
             }
-            Message::WhoWas { .. } => {
+            IrcCommand::WhoWas { .. } => {
                 state.warn(String::from("client received WHOWAS"));
             }
-            Message::Rehash => {
+            IrcCommand::Rehash => {
                 state.warn(String::from("client received REHASH"));
             }
-            Message::Restart => {
+            IrcCommand::Restart => {
                 state.warn(String::from("client received RESTART"));
             }
-            Message::SQuit { .. } => {
+            IrcCommand::SQuit { .. } => {
                 state.warn(String::from("client received SQUIT"));
             }
-            Message::Away { .. } => {
+            IrcCommand::Away { .. } => {
                 state.warn(String::from("client received AWAY"));
             }
-            Message::Links => {
+            IrcCommand::Links => {
                 state.warn(String::from("client received LINKS"));
             }
-            Message::Raw { .. } => {
+            IrcCommand::Raw { .. } => {
                 state.warn(String::from(
                     "client received RAW (????? this should genuinely be unreachable?!)",
                 ));

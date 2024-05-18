@@ -9,7 +9,7 @@ use log::*;
 
 use crate::{
     channel::{Channel, ChannelName, Nickname, UserMessages},
-    irc_message::IrcMessage,
+    irc::IrcMessage,
     targets::Target,
     ui::{keybinds::Action, term::TerminalUi, text::Line},
 };

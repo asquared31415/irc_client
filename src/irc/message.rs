@@ -5,17 +5,28 @@ use thiserror::Error;
 
 use crate::{
     ext::StrExt as _,
-    irc_message::{Message, MessageParseErr, MessageToStringErr, Source},
+    irc::{tags::Tags, IrcCommand, IrcCommandParseErr, IrcCommandToStringErr, Source},
 };
 
 #[derive(Debug, Clone)]
 pub struct IrcMessage {
-    pub tags: Option<()>,
+    pub tags: Tags,
     pub source: Option<Source>,
-    pub message: Message,
+    pub message: IrcCommand,
 }
 
 impl IrcMessage {
+    /// creates an irc message from just its command component. this should be used by all places in
+    /// the client that need to produce a message, since clients should not be allowed to send a
+    /// source.
+    pub fn from_command(cmd: IrcCommand) -> Self {
+        Self {
+            tags: Tags::empty(),
+            source: None,
+            message: cmd,
+        }
+    }
+
     /// parses a message from a string. the string must contain only a single message. the string
     /// must not contain CRLF.
     pub fn parse(s: &str) -> Result<Self, IrcParseErr> {
@@ -27,12 +38,17 @@ impl IrcMessage {
         let mut s = s.trim_start_matches(' ');
 
         // optional tags section
-        if s.starts_with('@') {
-            // TODO: tags
-            // if there is no space found, then the command part of the message is missing
-            let space = s.find(' ').ok_or(IrcParseErr::MissingCommand)?;
-            s = &s[space..];
-        }
+        let tags = if s.starts_with('@') {
+            s = &s[1..];
+            let Some((tags, rest)) = s.split_once(' ') else {
+                // if there's not a space after the tags, the command is missing
+                return Err(IrcParseErr::MissingCommand);
+            };
+            s = rest;
+            Tags::parse(tags).unwrap_or_else(|| Tags::empty())
+        } else {
+            Tags::empty()
+        };
 
         // optional source section
         let source = if let Some((_, rest)) = s.split_prefix(':') {
@@ -55,24 +71,25 @@ impl IrcMessage {
         }
 
         Ok(IrcMessage {
-            tags: None,
+            tags,
             source,
-            message: Message::parse(s)?,
+            message: IrcCommand::parse(s)?,
         })
     }
 
     // turns this message into a string that can be sent across the IRC connection directly. the
     // returned value includes the trailing CRLF that all messages must have.
-    pub fn to_irc_string(&self) -> Result<String, MessageToStringErr> {
+    pub fn to_irc_string(&self) -> Result<String, IrcCommandToStringErr> {
         let mut message = String::new();
 
-        if let Some(_tags) = self.tags {
-            todo!()
-        }
+        // TODO
+        // if let Some(_tags) = self.tags {
+        //     todo!()
+        // }
 
         // clients must never send a source to the server
         if self.source.is_some() {
-            return Err(MessageToStringErr::ClientMustNotSendSource);
+            return Err(IrcCommandToStringErr::ClientMustNotSendSource);
         }
 
         message.push_str(self.message.to_irc_string()?.as_str());
@@ -88,5 +105,5 @@ pub enum IrcParseErr {
     #[error("message is missing a command")]
     MissingCommand,
     #[error(transparent)]
-    MessageParseErr(#[from] MessageParseErr),
+    MessageParseErr(#[from] IrcCommandParseErr),
 }

@@ -21,7 +21,7 @@ use thiserror::Error;
 use crate::{
     command::Command,
     ext::*,
-    irc_message::{IrcMessage, Message},
+    irc::{IrcCommand, IrcMessage},
     net::ServerIo,
     state::{ClientState, ConnectedState, ConnectionState},
     targets::Target,
@@ -263,14 +263,10 @@ fn handle_input(
 
             state.add_line(target.clone(), line);
             sender
-                .send(IrcMessage {
-                    tags: None,
-                    source: None,
-                    message: Message::Privmsg {
-                        targets: vec![target],
-                        msg: input.to_string(),
-                    },
-                })
+                .send(IrcMessage::from_command(IrcCommand::Privmsg {
+                    targets: vec![target],
+                    msg: input.to_string(),
+                }))
                 .wrap_err("failed to send privmsg to writer thread")?;
 
             Ok(())
