@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::{
     channel::{ChannelName, Nickname},
-    irc::{IrcCommand, IrcMessage},
+    irc::client::{ClientIrcCommand, ClientMessage},
     state::{ClientState, ConnectedState, ConnectionState},
     targets::Target,
 };
@@ -98,20 +98,24 @@ impl Command {
         }
     }
 
-    pub fn handle(&self, state: &mut ClientState, sender: &Sender<IrcMessage>) -> eyre::Result<()> {
+    pub fn handle(
+        &self,
+        state: &mut ClientState,
+        sender: &Sender<ClientMessage>,
+    ) -> eyre::Result<()> {
         match self {
             Command::Join(channel) => {
                 let ConnectedState { .. } = expect_connected_state!(state, "JOIN")?;
 
-                let channel_name = ChannelName::new(channel)
+                let channel = ChannelName::new(channel)
                     .ok_or_else(|| eyre!("join was invalid channel {:?}", channel))?;
 
-                sender.send(IrcMessage::from_command(IrcCommand::Join(vec![(
-                    channel.to_string(),
+                sender.send(ClientMessage::from_command(ClientIrcCommand::Join(vec![(
+                    channel.clone(),
                     None,
                 )])))?;
 
-                state.ensure_target_exists(Target::Channel(channel_name));
+                state.ensure_target_exists(Target::Channel(channel));
             }
             Command::Ctcp(target, command) => {
                 todo!("handle CTCP command from user")
@@ -120,7 +124,9 @@ impl Command {
                 // don't need to access the state here, just need to ensure connected
                 let _ = expect_connected_state!(state, "RAW")?;
 
-                sender.send(IrcMessage::from_command(IrcCommand::Raw(text.to_string())))?;
+                sender.send(ClientMessage::from_command(ClientIrcCommand::Raw(
+                    text.to_string(),
+                )))?;
             }
             Command::Msg(nick) => {
                 let ConnectedState { .. } = expect_connected_state!(state, "PRIVMSG")?;
@@ -130,7 +136,7 @@ impl Command {
                 state.render()?;
             }
             Command::Quit => {
-                sender.send(IrcMessage::from_command(IrcCommand::Quit(None)))?;
+                sender.send(ClientMessage::from_command(ClientIrcCommand::Quit(None)))?;
                 crate::client::QUIT_REQUESTED.store(true, atomic::Ordering::Relaxed);
             }
         }

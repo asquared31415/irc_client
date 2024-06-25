@@ -21,7 +21,11 @@ use thiserror::Error;
 use crate::{
     command::Command,
     ext::*,
-    irc::{IrcCommand, IrcMessage},
+    irc::{
+        self,
+        client::{ClientIrcCommand, ClientMessage},
+        IrcMessage,
+    },
     net::ServerIo,
     state::{ClientState, ConnectedState, ConnectionState},
     targets::Target,
@@ -50,7 +54,7 @@ pub fn start(
     addr: &str,
     nick: &str,
     tls: bool,
-    init: impl Fn(&Sender<IrcMessage>) -> eyre::Result<()>,
+    init: impl Fn(&Sender<ClientMessage>) -> eyre::Result<()>,
 ) -> Result<!, ExitReason> {
     let Some((name, _)) = addr.split_once(':') else {
         return Err(eyre!("unable to determine host name for TLS"))?;
@@ -78,7 +82,7 @@ pub fn start(
     };
 
     // send to this channel to have a message written to the server
-    let (write_sender, write_receiver) = mpsc::channel::<IrcMessage>();
+    let (write_sender, write_receiver) = mpsc::channel::<ClientMessage>();
     // recv from this channel to get incoming messages from the server
     let (msg_sender, msg_receiver) = mpsc::channel::<IrcMessage>();
 
@@ -218,7 +222,7 @@ pub fn start(
 
 fn handle_input(
     state: &mut ClientState,
-    sender: &Sender<IrcMessage>,
+    sender: &Sender<ClientMessage>,
     input: &str,
 ) -> eyre::Result<()> {
     // ui.debug(format!("input: {}", input))?;
@@ -250,20 +254,23 @@ fn handle_input(
             };
             let nick = nick.clone();
 
-            let target = state.current_target().clone();
-            if target == Target::Status {
-                state.error(String::from("cannot send message to status"));
-                return Ok(());
-            }
-
+            let target = match state.current_target() {
+                Target::Status => {
+                    state.error(String::from("cannot send message to status"));
+                    return Ok(());
+                }
+                Target::Channel(channel) => irc::Target::Channel(channel.clone()),
+                Target::Nickname(nick) => irc::Target::User(nick.clone()),
+            };
             debug!("sending to {:?}", target);
+
             let line = util::line_now()
                 .join(util::message_nick_line(nick.as_str(), true))
                 .push_unstyled(input);
+            state.add_line(state.current_target().clone(), line);
 
-            state.add_line(target.clone(), line);
             sender
-                .send(IrcMessage::from_command(IrcCommand::Privmsg {
+                .send(ClientMessage::from_command(ClientIrcCommand::Privmsg {
                     targets: vec![target],
                     msg: input.to_string(),
                 }))

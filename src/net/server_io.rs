@@ -6,7 +6,10 @@ use thiserror::Error;
 
 use crate::{
     ext::{ReadWrite, WriteExt},
-    irc::{IrcCommandToStringErr, IrcMessage, IrcParseErr},
+    irc::{
+        client::{ClientMessage, ClientMessageToStringErr},
+        IrcMessage, IrcParseErr,
+    },
 };
 
 // the size of the receive buffer to allocate, in bytes.
@@ -27,7 +30,7 @@ pub enum MessagePollErr {
 #[derive(Debug, Error)]
 pub enum MsgWriteErr {
     #[error(transparent)]
-    MessageToStrErr(#[from] IrcCommandToStringErr),
+    MessageToStrErr(#[from] ClientMessageToStringErr),
     #[error(transparent)]
     Io(#[from] io::Error),
 }
@@ -53,8 +56,8 @@ impl ServerIo {
         }
     }
 
-    pub fn write(&mut self, msg: &IrcMessage) -> Result<(), MsgWriteErr> {
-        let msg = msg.to_irc_string()?;
+    pub fn write(&mut self, msg: &ClientMessage) -> Result<(), MsgWriteErr> {
+        let msg = msg.irc_str()?;
         // remove the \r\n when writing to the log file
         debug!("<- {:?}", &msg[..(msg.len() - 2)]);
         self.connection.write_all_blocking(msg.as_bytes())?;
@@ -136,7 +139,7 @@ impl ServerIo {
 // keep it to prepend to the next recv.
 fn from_utf8_lossy_split<'slice>(b: &'slice [u8]) -> (String, &'slice [u8]) {
     let mut s = String::new();
-    let mut chunks = Utf8Chunks::new(b).peekable();
+    let mut chunks = b.utf8_chunks().peekable();
     while let Some(chunk) = chunks.next() {
         s.push_str(chunk.valid());
         // if there's invalid data, either replace it if it's not at the end of the chunk,

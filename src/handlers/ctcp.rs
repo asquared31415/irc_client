@@ -2,8 +2,8 @@ use log::*;
 
 use crate::{
     channel::Nickname,
-    irc::{IrcCommand, IrcMessage},
-    targets::Target,
+    irc,
+    irc::client::{ClientIrcCommand, ClientMessage},
 };
 
 pub const CTCP_DELIM: u8 = 0x01;
@@ -19,8 +19,8 @@ pub enum CtcpCommand {
 }
 
 impl CtcpCommand {
-    pub fn to_msg(self, targets: Vec<Target>) -> IrcMessage {
-        IrcMessage::from_command(IrcCommand::Privmsg {
+    pub fn to_msg(self, targets: Vec<irc::Target>) -> ClientMessage {
+        ClientMessage::from_command(ClientIrcCommand::Privmsg {
             targets,
             msg: self.irc_string(),
         })
@@ -92,9 +92,9 @@ pub enum CtcpReply {
 }
 
 impl CtcpReply {
-    pub fn to_msg(self, nick: &Nickname) -> IrcMessage {
-        IrcMessage::from_command(IrcCommand::Notice {
-            targets: vec![Target::Nickname(nick.clone())],
+    pub fn to_msg(self, nick: &Nickname) -> ClientMessage {
+        ClientMessage::from_command(ClientIrcCommand::Notice {
+            targets: vec![irc::Target::User(nick.clone())],
             msg: self.as_irc_str(),
         })
     }

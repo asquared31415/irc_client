@@ -3,7 +3,10 @@ use eyre::{bail, eyre};
 
 use crate::{
     channel::{Channel, ChannelName},
-    irc::{IrcCommand, IrcMessage, Param, Source},
+    irc::{
+        client::{ClientIrcCommand, ClientMessage},
+        IrcCommand, IrcMessage, Param, Source,
+    },
     state::{ClientState, ConnectedState, ConnectionState, NamesState, RegistrationState},
     targets::Target,
     ui::text::Line,
@@ -44,7 +47,7 @@ impl IrcMessage {
             IrcCommand::Ping(token) => {
                 state
                     .msg_sender
-                    .send(IrcMessage::from_command(IrcCommand::Pong(
+                    .send(ClientMessage::from_command(ClientIrcCommand::Pong(
                         token.to_string(),
                     )))?;
             }

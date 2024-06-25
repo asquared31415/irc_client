@@ -172,10 +172,9 @@ impl IrcCommand {
                 Ok(IrcCommand::User(username, realname))
             }
             "PING" => {
-                let token = expect_string_param!(
-                    args.first()
-                        .ok_or_else(|| IrcCommandParseErr::MissingParams(s.to_string()))?
-                );
+                let token = expect_string_param!(args
+                    .first()
+                    .ok_or_else(|| IrcCommandParseErr::MissingParams(s.to_string()))?);
                 Ok(IrcCommand::Ping(token))
             }
             "PONG" => {

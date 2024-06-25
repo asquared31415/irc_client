@@ -17,7 +17,7 @@ use log::*;
 
 use crate::{
     client::ExitReason,
-    irc::{IrcCommand, IrcMessage},
+    irc::client::{ClientIrcCommand, ClientMessage},
 };
 
 mod channel;
@@ -77,15 +77,17 @@ fn main() -> eyre::Result<()> {
     logging::init(name, LevelFilter::Debug).map_err(|_| eyre!("failed to init logger"))?;
 
     //code to run upon starting.
-    let client_on_start = |sender: &Sender<IrcMessage>| {
+    let client_on_start = |sender: &Sender<ClientMessage>| {
         if let Some(token) = twitch_token.as_ref() {
-            sender.send(IrcMessage::from_command(IrcCommand::Pass(
+            sender.send(ClientMessage::from_command(ClientIrcCommand::Pass(
                 token.to_string(),
             )))?;
         }
 
-        sender.send(IrcMessage::from_command(IrcCommand::Nick(nick.clone())))?;
-        sender.send(IrcMessage::from_command(IrcCommand::User(
+        sender.send(ClientMessage::from_command(ClientIrcCommand::Nick(
+            nick.clone(),
+        )))?;
+        sender.send(ClientMessage::from_command(ClientIrcCommand::User(
             nick.clone(),
             nick.clone(),
         )))?;
